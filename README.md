@@ -1,22 +1,23 @@
 # Victor's Strike Counter
 
-A lightweight, cartoon-styled web app that tracks disciplinary **strikes** for Victor. The count is stored on a small **Fastify + SQLite** API so **everyone sees the same number**; only someone with an **admin token** can change it.
+A lightweight, cartoon-styled web app that tracks disciplinary **strikes** for Victor. The count is stored in a **Fastify + SQLite** API so **everyone sees the same number**. **David** (admin) logs in to change strikes and must give a **reason** each time; changes appear in **history**. **Victor** can **appeal** a history entry; **mediators** vote, and if a majority vote to **overturn** after everyone has voted, the strike change is reverted.
 
 ## Features
 
-- **Shared count** — One canonical strike total for all visitors (not per-browser).
-- **Half strikes** — Adjust in steps of **0.5** or **1.0**; the UI shows a clipped “half” Victor head for 0.5.
-- **Centered strike row** — Up to three strike icons stay centered; extras extend to the right without shifting the first three.
+- **Shared count** — One canonical strike total for all visitors.
+- **Roles** — `david` (change strikes, manage users: create, edit password/role, remove Victor/mediator accounts), `victor` (appeals), `mediator` (vote on appeals).
+- **History** — Every strike change is logged with an explanation.
+- **Appeals** — Victor submits one appeal per history row; mediators vote **overturn** or **uphold**; when **all** mediators have voted, the side with more votes wins (ties uphold David’s change).
+- **Half strikes** — Steps of **0.5** or **1.0**; UI shows a clipped “half” Victor head for 0.5.
 - **Timeout** — At **3.0+** strikes, a “VICTOR'S IN TIMEOUT!” banner appears.
-- **Zero strikes** — Shows **good_victor.png** and the line *Victor, you're a good boy!*
-- **Admin lock** — Strike buttons stay disabled until you unlock with the server’s `ADMIN_TOKEN` (stored in `sessionStorage` for that session only).
+- **Zero strikes** — Shows **good_victor.png** and *Victor, you're a good boy!*
 
 ## Tech stack
 
 | Layer | Technology |
 |--------|------------|
 | Frontend | React 19, TypeScript, Vite 8, Tailwind CSS 4, Lucide icons |
-| Backend | Node.js 22, Fastify 5, better-sqlite3 |
+| Backend | Node.js 22, Fastify 5, better-sqlite3, bcryptjs, cookie sessions |
 | Deploy | Docker Compose: **nginx** (static SPA + `/api` proxy) + **api** |
 
 ## Repository layout
@@ -26,9 +27,9 @@ A lightweight, cartoon-styled web app that tracks disciplinary **strikes** for V
 ├── web/                 # nginx.conf + Dockerfile for the SPA image
 ├── public/              # Static assets (Victor images, favicon)
 ├── src/                 # React app
-├── docker-compose.yml   # api + web + SQLite volume
-├── .env.example         # Copy to `.env` for Docker (ADMIN_TOKEN)
-└── package.json         # Frontend scripts
+├── docker-compose.yml
+├── .env.example         # Bootstrap David + optional SESSION_DAYS
+└── package.json
 ```
 
 ## Prerequisites
@@ -44,11 +45,14 @@ Run the **API** and **frontend** in two terminals.
 
 ```bash
 cd api
-export ADMIN_TOKEN='dev-secret-change-me'
-export SQLITE_PATH='./strikes.db'
+export BOOTSTRAP_DAVID_USERNAME=david
+export BOOTSTRAP_DAVID_PASSWORD=your-local-password
+export SQLITE_PATH=./strikes.db
 npm install
 npm start
 ```
+
+On **first run** with an empty database, David is created from those env vars. Log in on the site as `david` / `your-local-password`, then use **Controls** to create **Victor** and **mediator** accounts.
 
 Listens on **http://127.0.0.1:3000**.
 
@@ -59,9 +63,7 @@ npm install
 npm run dev
 ```
 
-Vite proxies **`/api`** to `http://127.0.0.1:3000`. Open the URL Vite prints (e.g. http://localhost:5173).
-
-Use **Controls → Unlock to change strikes** and enter the same value as `ADMIN_TOKEN`.
+Vite proxies **`/api`** to `http://127.0.0.1:3000`. Open the URL Vite prints (e.g. http://localhost:5173). Use **Log in** with David, Victor, or a mediator account.
 
 ### Scripts (frontend)
 
@@ -72,54 +74,50 @@ Use **Controls → Unlock to change strikes** and enter the same value as `ADMIN
 | `npm run preview` | Serve `dist/` locally |
 | `npm run lint` | ESLint |
 
-## HTTP API
+## HTTP API (summary)
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `GET` | `/api/strikes` | None | `{ "count": number }` |
-| `PUT` | `/api/strikes` | `Authorization: Bearer <ADMIN_TOKEN>` | Body `{ "count": number }`. Count must be ≥ 0 in **0.5** steps. Returns `{ "count": number }`. |
-
-If `ADMIN_TOKEN` is unset, `PUT` responds with **503**.
+| `GET` | `/api/strikes` | — | `{ count }` |
+| `PUT` | `/api/strikes` | Session, role `david` | `{ count, explanation }` |
+| `GET` | `/api/history` | — | Paginated history |
+| `POST` | `/api/auth/login` | — | `{ username, password }` → session cookie |
+| `POST` | `/api/auth/logout` | Session | |
+| `GET` | `/api/auth/me` | Session | |
+| `GET` / `POST` | `/api/users` | David only | List / create users (`victor` or `mediator`) |
+| `PATCH` | `/api/users/:id` | David only | Update password and/or role (`victor` \| `mediator`); cannot edit `david` accounts |
+| `DELETE` | `/api/users/:id` | David only | Remove a Victor or mediator; cannot remove `david` or yourself; deletes related appeals/votes |
+| `POST` | `/api/history/:id/appeals` | Victor | `{ message }` |
+| `GET` | `/api/appeals` | David / Victor / Mediator | Role-specific lists |
+| `POST` | `/api/appeals/:id/vote` | Mediator | `{ vote: "overturn" \| "uphold" }` |
 
 ## Deploy with Docker Compose (e.g. Raspberry Pi)
 
-Step-by-step for a Pi (paths, `rsync`, firewall, optional **GitHub Actions self-hosted auto-deploy**): see **[docs/DEPLOY-PI.md](docs/DEPLOY-PI.md)**.
+Step-by-step: **[docs/DEPLOY-PI.md](docs/DEPLOY-PI.md)** (includes GitHub Actions self-hosted runner).
 
-1. Copy **`.env.example`** to **`.env`** in the repo root (same folder as `docker-compose.yml`).
+1. Copy **`.env.example`** to **`.env`** next to `docker-compose.yml`.
+2. Set **`BOOTSTRAP_DAVID_USERNAME`** and **`BOOTSTRAP_DAVID_PASSWORD`** for first boot (strong password).
+3. `docker compose up -d --build`
+4. Open **http://&lt;host-ip&gt;:8080**, log in as David, create Victor and at least one mediator.
 
-2. Set a long random **`ADMIN_TOKEN`** in `.env`:
+SQLite lives in the Docker volume **`strikes-data`** (`/data/strikes.db` in the API container).
 
-   ```bash
-   openssl rand -hex 32
-   ```
-
-3. Start:
-
-   ```bash
-   docker compose up -d --build
-   ```
-
-4. Open **http://&lt;host-ip&gt;:8080** (map a different host port in `docker-compose.yml` if you like).
-
-SQLite data is in the Docker volume **`strikes-data`**, mounted at **`/data`** in the API container (`/data/strikes.db`).
-
-### Cross-build for ARM64 (Pi from another machine)
+### Cross-build for ARM64 (Raspberry Pi from another machine)
 
 ```bash
 docker buildx build --platform linux/arm64 -f api/Dockerfile -t victor-strikes-api ./api
 docker buildx build --platform linux/arm64 -f web/Dockerfile -t victor-strikes-web .
 ```
 
-Or run **`docker compose build`** directly **on the Pi** so the default platform matches.
-
 ### HTTPS / remote access
 
-Put **Caddy**, **Traefik**, or **Cloudflare Tunnel** in front of the stack if you need TLS or a public hostname. The app itself is plain HTTP on port 80 inside the web container.
+Use **Caddy**, **Traefik**, or **Cloudflare Tunnel** in front of the stack for TLS. Set **`NODE_ENV=production`** for the API (already in `docker-compose.yml`) so session cookies use the **Secure** flag when served over HTTPS.
 
 ## Security
 
-- The admin token is **shared-secret** protection: anyone who knows it can change strikes. Do **not** commit `.env` or bake the token into the frontend.
-- This is appropriate for a **trusted household** context, not for strong adversarial security.
+- Passwords are hashed with **bcrypt**; sessions use an **httpOnly** cookie.
+- Do **not** commit `.env`. Anyone who can log in as David can change strikes and manage non-David user accounts; mediators collectively decide appeals.
+- Suitable for a **trusted group**, not high-assurance scenarios.
 
 ## License
 

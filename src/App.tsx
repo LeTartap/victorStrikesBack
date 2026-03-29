@@ -1,6 +1,23 @@
-import { useState } from "react";
-import { ChevronUp, ChevronDown, RotateCcw, Lock, Unlock } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import {
+  ChevronUp,
+  ChevronDown,
+  RotateCcw,
+  LogIn,
+  LogOut,
+  Pencil,
+  Trash2,
+  UserPlus,
+  Users,
+} from "lucide-react";
 import { useStrikeCount } from "./useStrikeCount";
+import { useAuth } from "./useAuth";
+import { apiFetch } from "./api";
+import { HistorySection, AppealModal } from "./HistorySection";
+import { MediatorAppeals } from "./MediatorAppeals";
+import { DavidAppealsList } from "./DavidAppealsList";
+
+type ApiUserRow = { id: number; username: string; role: string; created_at: string };
 
 function VictorStrikeIcon({ half = false }: { half?: boolean }) {
   return (
@@ -73,202 +90,6 @@ function StrikeDisplay({ count }: { count: number }) {
   );
 }
 
-function ControlPanel({
-  onAdd,
-  onSubtract,
-  onReset,
-  count,
-  isAdmin,
-  busy,
-  loading,
-  mutationError,
-  onClearMutationError,
-  onUnlock,
-  onLock,
-}: {
-  onAdd: (n: number) => Promise<void>;
-  onSubtract: (n: number) => Promise<void>;
-  onReset: () => Promise<void>;
-  count: number;
-  isAdmin: boolean;
-  busy: boolean;
-  loading: boolean;
-  mutationError: string | null;
-  onClearMutationError: () => void;
-  onUnlock: (token: string) => void;
-  onLock: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [showUnlock, setShowUnlock] = useState(false);
-  const [tokenInput, setTokenInput] = useState("");
-
-  const cartoonBtn =
-    "px-5 py-2.5 rounded-full font-semibold text-sm text-white transition-all select-none";
-  const bevelActive = "active:translate-y-[3px] active:shadow-none";
-  const disabledMut = !isAdmin || busy || loading;
-
-  const run = async (fn: () => Promise<void>) => {
-    onClearMutationError();
-    await fn();
-  };
-
-  return (
-    <div className="fixed bottom-0 left-0 right-0 z-50">
-      {showUnlock && (
-        <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 px-4"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="unlock-title"
-        >
-          <div className="bg-white rounded-3xl border-4 border-cartoon-blue/30 p-6 max-w-sm w-full shadow-xl">
-            <h2 id="unlock-title" className="text-cartoon-blue text-lg font-bold mb-2">
-              Admin token
-            </h2>
-            <p className="text-zinc-600 text-sm mb-3">
-              Enter the same secret you set as <code className="text-xs bg-zinc-100 px-1 rounded">ADMIN_TOKEN</code> on the server.
-            </p>
-            <input
-              type="password"
-              value={tokenInput}
-              onChange={(e) => setTokenInput(e.target.value)}
-              className="w-full border-2 border-cartoon-blue/30 rounded-xl px-3 py-2 mb-4 font-mono text-sm"
-              placeholder="Token"
-              autoComplete="off"
-            />
-            <div className="flex gap-2 justify-end">
-              <button
-                type="button"
-                onClick={() => {
-                  setShowUnlock(false);
-                  setTokenInput("");
-                }}
-                className="px-4 py-2 rounded-full border-2 border-zinc-300 text-zinc-600 font-semibold text-sm cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  onUnlock(tokenInput);
-                  setTokenInput("");
-                  setShowUnlock(false);
-                  setOpen(true);
-                }}
-                disabled={!tokenInput.trim()}
-                className="px-4 py-2 rounded-full bg-cartoon-blue text-white font-semibold text-sm cursor-pointer disabled:opacity-40"
-              >
-                Unlock
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className="max-w-lg mx-auto">
-        <button
-          onClick={() => setOpen(!open)}
-          className="mx-auto flex items-center gap-2 px-5 py-2 bg-cartoon-blue text-white
-                     rounded-t-2xl text-sm font-semibold
-                     hover:bg-cartoon-blue/90 transition-colors cursor-pointer"
-        >
-          {open ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
-          Controls
-        </button>
-
-        <div
-          className={`overflow-hidden transition-all duration-300 ease-in-out ${
-            open ? "max-h-[28rem] opacity-100" : "max-h-0 opacity-0"
-          }`}
-        >
-          <div
-            className="flex flex-col gap-3 p-5 bg-white border-t-3 border-cartoon-blue/20
-                        rounded-t-none"
-          >
-            <div className="flex flex-wrap items-center justify-center gap-2">
-              {isAdmin ? (
-                <button
-                  type="button"
-                  onClick={onLock}
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-full border-2 border-strike-red/40
-                             text-strike-red text-sm font-semibold cursor-pointer hover:bg-strike-red/5"
-                >
-                  <Lock className="w-4 h-4" />
-                  Lock editing
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setShowUnlock(true)}
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-full bg-cartoon-blue/15
-                             text-cartoon-blue text-sm font-semibold cursor-pointer border-2 border-cartoon-blue/30"
-                >
-                  <Unlock className="w-4 h-4" />
-                  Unlock to change strikes
-                </button>
-              )}
-            </div>
-
-            {!isAdmin && (
-              <p className="text-center text-zinc-500 text-xs">
-                Everyone can see the count. Only you can change it after unlocking.
-              </p>
-            )}
-
-            {mutationError && (
-              <p className="text-center text-strike-red text-sm font-medium">{mutationError}</p>
-            )}
-
-            <div className="flex flex-wrap items-center justify-center gap-3">
-              <button
-                type="button"
-                onClick={() => run(() => onAdd(0.5))}
-                disabled={disabledMut}
-                className={`${cartoonBtn} ${bevelActive} bg-mint shadow-[0_4px_0_var(--color-mint-dark)]
-                            ${disabledMut ? "opacity-40 cursor-not-allowed pointer-events-none" : "cursor-pointer"}`}
-              >
-                + 0.5 Strike
-              </button>
-              <button
-                type="button"
-                onClick={() => run(() => onAdd(1))}
-                disabled={disabledMut}
-                className={`${cartoonBtn} ${bevelActive} bg-mint shadow-[0_4px_0_var(--color-mint-dark)]
-                            ${disabledMut ? "opacity-40 cursor-not-allowed pointer-events-none" : "cursor-pointer"}`}
-              >
-                + 1 Strike
-              </button>
-              <button
-                type="button"
-                onClick={() => run(() => onSubtract(0.5))}
-                disabled={disabledMut || count <= 0}
-                className={`${cartoonBtn} ${bevelActive} bg-coral shadow-[0_4px_0_var(--color-coral-dark)]
-                            disabled:opacity-30 disabled:cursor-not-allowed disabled:pointer-events-none
-                            ${disabledMut ? "opacity-40 cursor-not-allowed pointer-events-none" : "cursor-pointer"}`}
-              >
-                − 0.5 Strike
-              </button>
-              <button
-                type="button"
-                onClick={() => run(() => onReset())}
-                disabled={disabledMut || count === 0}
-                className={`px-5 py-2.5 rounded-full font-semibold text-sm transition-all select-none
-                            border-2 border-cartoon-blue text-cartoon-blue
-                            hover:bg-cartoon-blue/10 flex items-center gap-1.5
-                            disabled:opacity-30 disabled:cursor-not-allowed disabled:pointer-events-none
-                            ${disabledMut ? "opacity-40 cursor-not-allowed pointer-events-none" : "cursor-pointer"}`}
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                Reset
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function TimeoutBanner() {
   return (
     <div className="mt-8" style={{ animation: "wobble 0.6s ease-in-out infinite" }}>
@@ -285,26 +106,52 @@ function TimeoutBanner() {
 }
 
 export default function App() {
+  const { user, loading: authLoading, login, logout } = useAuth();
   const {
     count,
     loading,
     loadError,
-    isAdmin,
     add,
     subtract,
     reset,
-    unlock,
-    lock,
+    refetch,
   } = useStrikeCount();
 
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [showLogin, setShowLogin] = useState(false);
+  const [loginUser, setLoginUser] = useState("");
+  const [loginPass, setLoginPass] = useState("");
+  const [loginErr, setLoginErr] = useState<string | null>(null);
+  const [explanation, setExplanation] = useState("");
+  const [historyKey, setHistoryKey] = useState(0);
+  const [appealHistId, setAppealHistId] = useState<number | null>(null);
+
+  const [newName, setNewName] = useState("");
+  const [newPass, setNewPass] = useState("");
+  const [newRole, setNewRole] = useState<"victor" | "mediator">("victor");
+  const [userMsg, setUserMsg] = useState<string | null>(null);
+  const [users, setUsers] = useState<ApiUserRow[]>([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [editUser, setEditUser] = useState<ApiUserRow | null>(null);
+  const [editPass, setEditPass] = useState("");
+  const [editRole, setEditRole] = useState<"victor" | "mediator">("victor");
+  const [userManageBusy, setUserManageBusy] = useState(false);
+
+  const isDavid = user?.role === "david";
+  const isVictor = user?.role === "victor";
+  const isMediator = user?.role === "mediator";
+
+  const bumpHistory = () => setHistoryKey((k) => k + 1);
 
   const runMutation = async (fn: () => Promise<void>) => {
     setMutationError(null);
     setBusy(true);
     try {
       await fn();
+      bumpHistory();
+      await refetch();
     } catch (e) {
       setMutationError(e instanceof Error ? e.message : "Something went wrong");
     } finally {
@@ -312,8 +159,166 @@ export default function App() {
     }
   };
 
+  const expOk = explanation.trim().length > 0;
+
+  const handleLogin = async () => {
+    setLoginErr(null);
+    try {
+      await login(loginUser.trim(), loginPass);
+      setShowLogin(false);
+      setLoginPass("");
+    } catch (e) {
+      setLoginErr(e instanceof Error ? e.message : "Login failed");
+    }
+  };
+
+  const loadUsers = useCallback(async () => {
+    if (!isDavid) return;
+    setUsersLoading(true);
+    try {
+      const r = await apiFetch("/api/users");
+      if (r.ok) {
+        const j = (await r.json()) as { users: ApiUserRow[] };
+        setUsers(j.users ?? []);
+      }
+    } finally {
+      setUsersLoading(false);
+    }
+  }, [isDavid]);
+
+  useEffect(() => {
+    if (isDavid && panelOpen) void loadUsers();
+  }, [isDavid, panelOpen, loadUsers]);
+
+  const createUser = async () => {
+    setUserMsg(null);
+    try {
+      const r = await apiFetch("/api/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: newName.trim(),
+          password: newPass,
+          role: newRole,
+        }),
+      });
+      if (!r.ok) {
+        const j = (await r.json().catch(() => ({}))) as { error?: string };
+        throw new Error(j.error ?? "Failed");
+      }
+      setUserMsg(`Created ${newName.trim()}`);
+      setNewName("");
+      setNewPass("");
+      await loadUsers();
+    } catch (e) {
+      setUserMsg(e instanceof Error ? e.message : "Error");
+    }
+  };
+
+  const saveUserEdit = async () => {
+    if (!editUser) return;
+    const body: { password?: string; role?: string } = {};
+    if (editPass.trim()) body.password = editPass;
+    if (editRole !== editUser.role) body.role = editRole;
+    if (Object.keys(body).length === 0) {
+      setEditUser(null);
+      setEditPass("");
+      return;
+    }
+    setUserMsg(null);
+    setUserManageBusy(true);
+    try {
+      const r = await apiFetch(`/api/users/${editUser.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) {
+        const j = (await r.json().catch(() => ({}))) as { error?: string };
+        throw new Error(j.error ?? "Update failed");
+      }
+      setUserMsg(`Updated ${editUser.username}`);
+      setEditUser(null);
+      setEditPass("");
+      await loadUsers();
+    } catch (e) {
+      setUserMsg(e instanceof Error ? e.message : "Error");
+    } finally {
+      setUserManageBusy(false);
+    }
+  };
+
+  const removeUser = async (u: ApiUserRow) => {
+    if (u.role === "david") return;
+    if (
+      !confirm(
+        `Remove user "${u.username}"? Their appeals and mediator votes for this account will be deleted.`,
+      )
+    ) {
+      return;
+    }
+    setUserMsg(null);
+    setUserManageBusy(true);
+    try {
+      const r = await apiFetch(`/api/users/${u.id}`, { method: "DELETE" });
+      if (!r.ok) {
+        const j = (await r.json().catch(() => ({}))) as { error?: string };
+        throw new Error(j.error ?? "Delete failed");
+      }
+      setUserMsg(`Removed ${u.username}`);
+      await loadUsers();
+    } catch (e) {
+      setUserMsg(e instanceof Error ? e.message : "Error");
+    } finally {
+      setUserManageBusy(false);
+    }
+  };
+
+  const submitAppeal = async (message: string) => {
+    if (appealHistId == null) return;
+    const r = await apiFetch(`/api/history/${appealHistId}/appeals`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message }),
+    });
+    if (!r.ok) {
+      const j = (await r.json().catch(() => ({}))) as { error?: string };
+      throw new Error(j.error ?? "Appeal failed");
+    }
+    bumpHistory();
+  };
+
   return (
-    <div className="min-h-dvh flex flex-col items-center justify-center px-4 pb-24 select-none">
+    <div className="min-h-dvh flex flex-col items-center px-4 pb-32 select-none">
+      <div className="w-full max-w-2xl flex justify-end items-center gap-2 pt-3 mb-2">
+        {authLoading ? (
+          <span className="text-zinc-400 text-sm">…</span>
+        ) : user ? (
+          <>
+            <span className="text-zinc-600 text-sm">
+              {user.username} ({user.role})
+            </span>
+            <button
+              type="button"
+              onClick={() => logout()}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-full border-2 border-zinc-300 text-sm text-zinc-600 cursor-pointer"
+            >
+              <LogOut className="w-4 h-4" />
+              Log out
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setShowLogin(true)}
+            className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-cartoon-blue text-white text-sm font-semibold cursor-pointer"
+          >
+            <LogIn className="w-4 h-4" />
+            Log in
+          </button>
+        )}
+      </div>
+
       <h1 className="text-cartoon-blue text-base sm:text-lg font-semibold tracking-[0.25em] uppercase mb-3">
         Victor's Strike Counter
       </h1>
@@ -327,7 +332,7 @@ export default function App() {
           <p className="text-strike-red font-semibold mb-1">Could not reach the server</p>
           <p className="text-zinc-600 text-sm">{loadError}</p>
           <p className="text-zinc-500 text-xs mt-2">
-            Run the API (see README), or use <code className="bg-white/80 px-1 rounded">npm run dev</code> with the API on port 3000.
+            Run the API with bootstrap env (see README). For dev: API on port 3000.
           </p>
         </div>
       )}
@@ -354,23 +359,326 @@ export default function App() {
           </div>
 
           {count >= 3 && <TimeoutBanner />}
+
+          <HistorySection
+            refreshKey={historyKey}
+            user={user}
+            onAppealClick={(id) => setAppealHistId(id)}
+          />
+
+          {isVictor && (
+            <AppealModal
+              open={appealHistId != null}
+              historyId={appealHistId}
+              onClose={() => setAppealHistId(null)}
+              onSubmit={submitAppeal}
+            />
+          )}
+
+          {isMediator && <MediatorAppeals refreshKey={historyKey} />}
+          {isDavid && <DavidAppealsList refreshKey={historyKey} />}
         </>
       )}
 
+      {showLogin && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 px-4"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="bg-white rounded-3xl border-4 border-cartoon-blue/30 p-6 max-w-sm w-full shadow-xl">
+            <h2 className="text-cartoon-blue text-lg font-bold mb-2">Log in</h2>
+            <input
+              type="text"
+              value={loginUser}
+              onChange={(e) => setLoginUser(e.target.value)}
+              className="w-full border-2 border-cartoon-blue/30 rounded-xl px-3 py-2 mb-2 text-sm"
+              placeholder="Username"
+              autoComplete="username"
+            />
+            <input
+              type="password"
+              value={loginPass}
+              onChange={(e) => setLoginPass(e.target.value)}
+              className="w-full border-2 border-cartoon-blue/30 rounded-xl px-3 py-2 mb-2 text-sm"
+              placeholder="Password"
+              autoComplete="current-password"
+            />
+            {loginErr && <p className="text-strike-red text-sm mb-2">{loginErr}</p>}
+            <div className="flex gap-2 justify-end mt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowLogin(false);
+                  setLoginErr(null);
+                }}
+                className="px-4 py-2 rounded-full border-2 border-zinc-300 text-zinc-600 font-semibold text-sm cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleLogin()}
+                disabled={!loginUser.trim() || !loginPass}
+                className="px-4 py-2 rounded-full bg-cartoon-blue text-white font-semibold text-sm cursor-pointer disabled:opacity-40"
+              >
+                Log in
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {!loadError && (
-        <ControlPanel
-          onAdd={(n) => runMutation(() => add(n))}
-          onSubtract={(n) => runMutation(() => subtract(n))}
-          onReset={() => runMutation(() => reset())}
-          count={count}
-          isAdmin={isAdmin}
-          busy={busy}
-          loading={loading}
-          mutationError={mutationError}
-          onClearMutationError={() => setMutationError(null)}
-          onUnlock={unlock}
-          onLock={lock}
-        />
+        <div className="fixed bottom-0 left-0 right-0 z-50">
+          <div className="max-w-lg mx-auto">
+            <button
+              type="button"
+              onClick={() => setPanelOpen(!panelOpen)}
+              className="mx-auto flex items-center gap-2 px-5 py-2 bg-cartoon-blue text-white
+                         rounded-t-2xl text-sm font-semibold
+                         hover:bg-cartoon-blue/90 transition-colors cursor-pointer"
+            >
+              {panelOpen ? (
+                <ChevronDown className="w-4 h-4" />
+              ) : (
+                <ChevronUp className="w-4 h-4" />
+              )}
+              Controls
+            </button>
+
+            <div
+              className={`overflow-hidden transition-all duration-300 ease-in-out ${
+                panelOpen ? "max-h-[32rem] opacity-100 overflow-y-auto" : "max-h-0 opacity-0"
+              }`}
+            >
+              <div
+                className="flex flex-col gap-3 p-5 bg-white border-t-3 border-cartoon-blue/20
+                            rounded-t-none max-h-[70vh] overflow-y-auto"
+              >
+                {isDavid && (
+                  <>
+                    <label className="block text-sm text-zinc-600 font-medium">
+                      Reason for strike change (required)
+                    </label>
+                    <textarea
+                      value={explanation}
+                      onChange={(e) => setExplanation(e.target.value)}
+                      className="w-full border-2 border-cartoon-blue/30 rounded-xl px-3 py-2 text-sm min-h-[72px]"
+                      placeholder="Why are you changing the count?"
+                    />
+                    {mutationError && (
+                      <p className="text-center text-strike-red text-sm font-medium">{mutationError}</p>
+                    )}
+                    <div className="flex flex-wrap items-center justify-center gap-3">
+                      <button
+                        type="button"
+                        disabled={busy || !expOk}
+                        onClick={() =>
+                          runMutation(() => add(0.5, explanation.trim()))
+                        }
+                        className="px-5 py-2.5 rounded-full font-semibold text-sm text-white bg-mint shadow-[0_4px_0_var(--color-mint-dark)] active:translate-y-[3px] active:shadow-none disabled:opacity-40 cursor-pointer disabled:pointer-events-none"
+                      >
+                        + 0.5 Strike
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy || !expOk}
+                        onClick={() => runMutation(() => add(1, explanation.trim()))}
+                        className="px-5 py-2.5 rounded-full font-semibold text-sm text-white bg-mint shadow-[0_4px_0_var(--color-mint-dark)] active:translate-y-[3px] active:shadow-none disabled:opacity-40 cursor-pointer disabled:pointer-events-none"
+                      >
+                        + 1 Strike
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy || !expOk || count <= 0}
+                        onClick={() =>
+                          runMutation(() => subtract(0.5, explanation.trim()))
+                        }
+                        className="px-5 py-2.5 rounded-full font-semibold text-sm text-white bg-coral shadow-[0_4px_0_var(--color-coral-dark)] active:translate-y-[3px] active:shadow-none disabled:opacity-30 cursor-pointer disabled:pointer-events-none"
+                      >
+                        − 0.5 Strike
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy || !expOk || count === 0}
+                        onClick={() => runMutation(() => reset(explanation.trim()))}
+                        className="px-5 py-2.5 rounded-full font-semibold text-sm transition-all cursor-pointer
+                                    border-2 border-cartoon-blue text-cartoon-blue
+                                    hover:bg-cartoon-blue/10 flex items-center gap-1.5
+                                    disabled:opacity-30 disabled:pointer-events-none"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        Reset
+                      </button>
+                    </div>
+
+                    <div className="border-t border-dashed border-zinc-200 pt-4 mt-2">
+                      <h3 className="text-cartoon-blue font-bold text-sm mb-2 flex items-center gap-2">
+                        <Users className="w-4 h-4" />
+                        Accounts
+                      </h3>
+                      {usersLoading ? (
+                        <p className="text-xs text-zinc-500">Loading users…</p>
+                      ) : (
+                        <ul className="flex flex-col gap-1.5 text-sm">
+                          {users.map((u) => (
+                            <li
+                              key={u.id}
+                              className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-zinc-200/80 px-2 py-1.5"
+                            >
+                              <span className="font-medium text-zinc-800">
+                                {u.username}{" "}
+                                <span className="text-zinc-500 font-normal">({u.role})</span>
+                              </span>
+                              {u.role === "david" ? (
+                                <span className="text-xs text-zinc-400">David account</span>
+                              ) : (
+                                <span className="flex items-center gap-1">
+                                  <button
+                                    type="button"
+                                    disabled={userManageBusy}
+                                    onClick={() => {
+                                      setEditUser(u);
+                                      setEditPass("");
+                                      setEditRole(u.role === "mediator" ? "mediator" : "victor");
+                                    }}
+                                    className="inline-flex items-center gap-0.5 px-2 py-1 rounded-md border border-cartoon-blue/30 text-cartoon-blue text-xs font-semibold cursor-pointer disabled:opacity-40"
+                                  >
+                                    <Pencil className="w-3 h-3" />
+                                    Edit
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={userManageBusy || u.id === user?.id}
+                                    onClick={() => void removeUser(u)}
+                                    className="inline-flex items-center gap-0.5 px-2 py-1 rounded-md border border-strike-red/40 text-strike-red text-xs font-semibold cursor-pointer disabled:opacity-40"
+                                    title={
+                                      u.id === user?.id ? "Cannot remove your own account" : undefined
+                                    }
+                                  >
+                                    <Trash2 className="w-3 h-3" />
+                                    Remove
+                                  </button>
+                                </span>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+
+                    <div className="border-t border-dashed border-zinc-200 pt-4 mt-2">
+                      <h3 className="text-cartoon-blue font-bold text-sm mb-2 flex items-center gap-2">
+                        <UserPlus className="w-4 h-4" />
+                        Add user (Victor or Mediator)
+                      </h3>
+                      <div className="flex flex-col gap-2">
+                        <input
+                          type="text"
+                          value={newName}
+                          onChange={(e) => setNewName(e.target.value)}
+                          className="border-2 border-cartoon-blue/20 rounded-lg px-2 py-1.5 text-sm"
+                          placeholder="Username"
+                        />
+                        <input
+                          type="password"
+                          value={newPass}
+                          onChange={(e) => setNewPass(e.target.value)}
+                          className="border-2 border-cartoon-blue/20 rounded-lg px-2 py-1.5 text-sm"
+                          placeholder="Password (min 6)"
+                        />
+                        <select
+                          value={newRole}
+                          onChange={(e) =>
+                            setNewRole(e.target.value as "victor" | "mediator")
+                          }
+                          className="border-2 border-cartoon-blue/20 rounded-lg px-2 py-1.5 text-sm"
+                        >
+                          <option value="victor">Victor</option>
+                          <option value="mediator">Mediator</option>
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => void createUser()}
+                          className="px-4 py-2 rounded-full bg-cartoon-blue text-white text-sm font-semibold cursor-pointer"
+                        >
+                          Create user
+                        </button>
+                        {userMsg && (
+                          <p className="text-xs text-zinc-600 font-medium">{userMsg}</p>
+                        )}
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {!isDavid && (
+                  <p className="text-center text-zinc-500 text-xs">
+                    Log in as <strong>David</strong> to change strikes. Victor and mediators use
+                    Log in for appeals and votes.
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editUser && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="edit-user-title"
+        >
+          <div className="bg-white rounded-2xl border-2 border-cartoon-blue/25 shadow-xl max-w-sm w-full p-4 flex flex-col gap-3">
+            <h3 id="edit-user-title" className="font-bold text-cartoon-blue">
+              Edit {editUser.username}
+            </h3>
+            <p className="text-xs text-zinc-500">
+              Leave password blank to keep the current password. Change role between Victor and
+              Mediator if needed.
+            </p>
+            <input
+              type="password"
+              value={editPass}
+              onChange={(e) => setEditPass(e.target.value)}
+              className="border-2 border-cartoon-blue/20 rounded-lg px-2 py-1.5 text-sm"
+              placeholder="New password (min 6, optional)"
+              autoComplete="new-password"
+            />
+            <select
+              value={editRole}
+              onChange={(e) => setEditRole(e.target.value as "victor" | "mediator")}
+              className="border-2 border-cartoon-blue/20 rounded-lg px-2 py-1.5 text-sm"
+            >
+              <option value="victor">Victor</option>
+              <option value="mediator">Mediator</option>
+            </select>
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                type="button"
+                disabled={userManageBusy}
+                onClick={() => {
+                  setEditUser(null);
+                  setEditPass("");
+                }}
+                className="px-3 py-1.5 rounded-full text-sm border-2 border-zinc-300 text-zinc-600 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={userManageBusy}
+                onClick={() => void saveUserEdit()}
+                className="px-3 py-1.5 rounded-full text-sm font-semibold bg-cartoon-blue text-white cursor-pointer disabled:opacity-40"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -1,29 +1,12 @@
 import { useState, useCallback, useEffect } from "react";
+import { apiFetch } from "./api";
 
 const API = "/api/strikes";
-const TOKEN_KEY = "victor-admin-token";
-
-export function getAdminToken(): string | null {
-  try {
-    return sessionStorage.getItem(TOKEN_KEY);
-  } catch {
-    return null;
-  }
-}
-
-export function setAdminToken(token: string) {
-  sessionStorage.setItem(TOKEN_KEY, token);
-}
-
-export function clearAdminToken() {
-  sessionStorage.removeItem(TOKEN_KEY);
-}
 
 export function useStrikeCount() {
   const [count, setCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [isAdmin, setIsAdmin] = useState(() => !!getAdminToken());
 
   const fetchCount = useCallback(async () => {
     const r = await fetch(API);
@@ -62,21 +45,14 @@ export function useStrikeCount() {
     return () => document.removeEventListener("visibilitychange", onVis);
   }, [fetchCount]);
 
-  const persistRemote = useCallback(async (next: number) => {
-    const token = getAdminToken();
-    if (!token) throw new Error("Unlock controls with your admin token first");
-    const r = await fetch(API, {
+  const persistRemote = useCallback(async (next: number, explanation: string) => {
+    const r = await apiFetch(API, {
       method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ count: next }),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ count: next, explanation }),
     });
-    if (r.status === 401) {
-      clearAdminToken();
-      setIsAdmin(false);
-      throw new Error("Invalid or expired token");
+    if (r.status === 401 || r.status === 403) {
+      throw new Error("Not allowed — log in as David");
     }
     if (!r.ok) {
       const j = (await r.json().catch(() => ({}))) as { error?: string };
@@ -87,45 +63,35 @@ export function useStrikeCount() {
   }, []);
 
   const add = useCallback(
-    async (amount: number) => {
+    async (amount: number, explanation: string) => {
       const next = Math.max(0, Math.round((count + amount) * 2) / 2);
-      await persistRemote(next);
+      await persistRemote(next, explanation);
     },
     [count, persistRemote],
   );
 
   const subtract = useCallback(
-    async (amount: number) => {
+    async (amount: number, explanation: string) => {
       const next = Math.max(0, Math.round((count - amount) * 2) / 2);
-      await persistRemote(next);
+      await persistRemote(next, explanation);
     },
     [count, persistRemote],
   );
 
-  const reset = useCallback(async () => {
-    await persistRemote(0);
-  }, [persistRemote]);
-
-  const unlock = useCallback((token: string) => {
-    setAdminToken(token.trim());
-    setIsAdmin(true);
-  }, []);
-
-  const lock = useCallback(() => {
-    clearAdminToken();
-    setIsAdmin(false);
-  }, []);
+  const reset = useCallback(
+    async (explanation: string) => {
+      await persistRemote(0, explanation);
+    },
+    [persistRemote],
+  );
 
   return {
     count,
     loading,
     loadError,
-    isAdmin,
     add,
     subtract,
     reset,
-    unlock,
-    lock,
     refetch: fetchCount,
   } as const;
 }
