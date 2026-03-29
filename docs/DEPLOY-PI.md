@@ -134,7 +134,26 @@ GitHub’s cloud runners cannot reach a Pi on a private LAN. A **[self-hosted ru
 ### One-time setup
 
 1. On the Pi, ensure the project is a **git clone** at `/opt/docker/projects/victorStrikesBack` (same path as above), with `.env` present. The clone’s `origin` must point at this GitHub repo.
-2. The Linux user that will run the runner must be in the **`docker`** group (`newgrp docker` or re-login after `usermod`).
+2. The Linux user that will run the runner must be in the **`docker`** group. If you already installed Docker before adding this user, run (replace `YOUR_USER` with the account that runs the runner — often your login user, e.g. `david`):
+
+   ```bash
+   sudo usermod -aG docker YOUR_USER
+   ```
+
+   Then **restart the runner** so it picks up the new group (logging out is not enough for a systemd service):
+
+   ```bash
+   # If you used GitHub’s install script as a service (common):
+   sudo systemctl restart actions.runner.*
+
+   # Or from the runner folder:
+   sudo ./svc.sh stop && sudo ./svc.sh start
+   ```
+
+   If you only use `./run.sh` in a terminal, stop it and start it again in a **new** SSH session (or run `newgrp docker` once in that shell before `./run.sh`).
+
+   **Symptom:** `permission denied while trying to connect to the Docker daemon socket` during `docker compose` in Actions — almost always means the runner user is **not** in group `docker` or the runner was not restarted after `usermod`.
+
 3. In GitHub: repo **Settings → Actions → Runners → New self-hosted runner**. Choose Linux and arm64 (Raspberry Pi), then run the download and `config.sh` commands **on the Pi**. When asked for labels, you can add `pi` (optional); the workflow uses `runs-on: self-hosted` only, so any self-hosted runner for this repo will pick up the job.
 4. Start the runner: `./run.sh` (or install as a service per GitHub’s instructions so it survives reboot).
 
@@ -164,7 +183,8 @@ Anyone who can push to the tracked branches can trigger a deploy on the Pi. Rest
 
 | Issue | What to try |
 |--------|-------------|
-| `permission denied` on Docker | `sudo usermod -aG docker $USER` and re-login |
+| `permission denied` … `docker.sock` (Actions runner) | `sudo usermod -aG docker <runner-user>`, then `sudo systemctl restart actions.runner.*` (see section 8) |
+| `permission denied` on Docker (your shell) | `sudo usermod -aG docker $USER` and open a new SSH session |
 | Port 8080 in use | Change `8080:80` in `docker-compose.yml` to e.g. `8888:80` |
 | `ADMIN_TOKEN` empty | `PUT` returns 503; set `ADMIN_TOKEN` in `.env` and `docker compose up -d` again |
 | Build fails on Pi (memory) | Build on a PC with `docker buildx build --platform linux/arm64` and load images, or add swap on the Pi |
