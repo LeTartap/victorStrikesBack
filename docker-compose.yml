@@ -1,0 +1,22 @@
+services:
+  api:
+    build: ./api
+    restart: unless-stopped
+    environment:
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+      SQLITE_PATH: /data/strikes.db
+    volumes:
+      - strikes-data:/data
+
+  web:
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    depends_on:
+      - api
+
+volumes:
+  strikes-data:

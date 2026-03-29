@@ -1,0 +1,18 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Fredoka", system-ui, sans-serif;
+  --color-cream: #FFFDF0;
+  --color-cartoon-blue: #3C91FF;
+  --color-strike-red: #E53935;
+  --color-mint: #7DCEA0;
+  --color-mint-dark: #5BA882;
+  --color-coral: #F08080;
+  --color-coral-dark: #C96262;
+  --color-warning-yellow: #FFD54F;
+}
+
+@keyframes wobble {
+  0%, 100% { transform: rotate(-2deg); }
+  50% { transform: rotate(2deg); }
+}

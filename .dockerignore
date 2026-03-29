@@ -1,0 +1,11 @@
+node_modules
+dist
+.git
+api/node_modules
+api/*.db
+api/*.db-wal
+api/*.db-shm
+*.log
+.env
+api.env
+image_1.png

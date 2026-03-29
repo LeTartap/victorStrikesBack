@@ -1,0 +1,12 @@
+{
+  "name": "victor-strikes-api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "fastify": "^5.2.1",
+    "better-sqlite3": "^11.8.1"
+  }
+}
