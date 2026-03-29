@@ -427,14 +427,15 @@ app.get("/api/appeals", async (request, reply) => {
     const rows = db
       .prepare(
         `SELECT a.*, h.previous_count, h.new_count, h.explanation AS history_explanation,
-                vu.username AS victor_username
+                vu.username AS victor_username,
+                (SELECT COUNT(*) FROM appeal_votes av WHERE av.appeal_id = a.id) AS vote_count
          FROM appeals a
          JOIN strike_history h ON h.id = a.history_id
          JOIN users vu ON vu.id = a.victor_id
          ORDER BY a.id DESC`,
       )
       .all();
-    return { appeals: rows };
+    return { appeals: rows, mediator_total: mediatorCountStmt.get().c };
   }
 
   if (user.role === "victor") {
@@ -467,6 +468,40 @@ app.get("/api/appeals", async (request, reply) => {
   }
 
   return reply.code(403).send({ error: "Forbidden" });
+});
+
+app.get("/api/appeals/:id", async (request, reply) => {
+  const user = getSessionUser(request);
+  if (!requireRole(user, ["david"])) return reply.code(403).send({ error: "Forbidden" });
+  const id = Number(request.params.id);
+  if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ error: "Invalid id" });
+
+  const appeal = db
+    .prepare(
+      `SELECT a.*, h.previous_count, h.new_count, h.explanation AS history_explanation,
+              vu.username AS victor_username
+       FROM appeals a
+       JOIN strike_history h ON h.id = a.history_id
+       JOIN users vu ON vu.id = a.victor_id
+       WHERE a.id = ?`,
+    )
+    .get(id);
+  if (!appeal) return reply.code(404).send({ error: "not found" });
+
+  const votes = db
+    .prepare(
+      `SELECT u.username AS mediator_username, av.vote, av.created_at
+       FROM appeal_votes av
+       JOIN users u ON u.id = av.mediator_id
+       WHERE av.appeal_id = ?
+       ORDER BY av.created_at ASC`,
+    )
+    .all(id);
+
+  return {
+    appeal: { ...appeal, votes },
+    mediator_total: mediatorCountStmt.get().c,
+  };
 });
 
 app.post("/api/appeals/:aid/vote", async (request, reply) => {

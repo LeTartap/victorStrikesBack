@@ -88,7 +88,8 @@ Vite proxies **`/api`** to `http://127.0.0.1:3000`. Open the URL Vite prints (e.
 | `PATCH` | `/api/users/:id` | David only | Update password and/or role (`victor` \| `mediator`); cannot edit `david` accounts |
 | `DELETE` | `/api/users/:id` | David only | Remove a Victor or mediator; cannot remove `david` or yourself; deletes related appeals/votes |
 | `POST` | `/api/history/:id/appeals` | Victor | `{ message }` |
-| `GET` | `/api/appeals` | David / Victor / Mediator | Role-specific lists |
+| `GET` | `/api/appeals` | David / Victor / Mediator | Role-specific lists (David gets `vote_count` and `mediator_total`) |
+| `GET` | `/api/appeals/:id` | David only | Full appeal + `votes[]` (mediator username, vote, time) |
 | `POST` | `/api/appeals/:id/vote` | Mediator | `{ vote: "overturn" \| "uphold" }` |
 
 ## Deploy with Docker Compose (e.g. Raspberry Pi)

@@ -101,6 +101,52 @@ Example: `http://192.168.10.116:8080`
 
 In the app: **Log in** as David (or Victor / a mediator). David uses **Controls** to change strikes (with a required explanation) and to create other users.
 
+### Where the SQLite files live on disk
+
+Inside the API container, the database is `/data/strikes.db` (plus WAL sidecar files). Those files are **not** in your git checkout; they are stored in the **named Docker volume** `strikes-data` from `docker-compose.yml`.
+
+On the Pi, Docker keeps that volume under its data root, usually:
+
+`/var/lib/docker/volumes/<compose_project>_strikes-data/_data/`
+
+The compose project name defaults to the **folder name** of the project (e.g. `victorstrikesback_strikes-data`). To see the exact path:
+
+```bash
+cd /opt/docker/projects/victorStrikesBack
+docker volume ls | grep strikes
+docker volume inspect "$(docker volume ls -q | grep strikes-data)" --format '{{ .Mountpoint }}'
+```
+
+You normally **do not** edit files there by hand; use backups (`docker run` with a volume mount, or `docker cp`) if you need a copy. Removing the volume (`docker compose down -v`) **deletes** this data.
+
+### Safe reset of the database (fresh start)
+
+**Do not** delete `strikes.db` (or WAL files) under `/var/lib/docker/volumes/.../_data` while the **api** container is running — SQLite may corrupt or behave oddly. Prefer one of these:
+
+**Option A — let Compose remove the volume (simplest)**
+
+```bash
+cd /opt/docker/projects/victorStrikesBack
+docker compose down -v    # -v removes the strikes-data volume and its contents
+```
+
+Ensure `.env` has `BOOTSTRAP_DAVID_USERNAME` and `BOOTSTRAP_DAVID_PASSWORD`, then:
+
+```bash
+docker compose up -d --build
+```
+
+On first API start with an empty DB, David is created from those variables.
+
+**Option B — stop first, then delete files**
+
+```bash
+docker compose down
+# now safe to remove files in the volume’s _data folder, or use `docker volume rm ...` after down
+```
+
+Then `docker compose up -d` again.
+
 ## 6. Firewall (if enabled)
 
 If `ufw` is on:
