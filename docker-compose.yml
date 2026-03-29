@@ -3,8 +3,11 @@ services:
     build: ./api
     restart: unless-stopped
     environment:
-      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+      NODE_ENV: production
       SQLITE_PATH: /data/strikes.db
+      BOOTSTRAP_DAVID_USERNAME: ${BOOTSTRAP_DAVID_USERNAME:-}
+      BOOTSTRAP_DAVID_PASSWORD: ${BOOTSTRAP_DAVID_PASSWORD:-}
+      SESSION_DAYS: ${SESSION_DAYS:-7}
     volumes:
       - strikes-data:/data
 

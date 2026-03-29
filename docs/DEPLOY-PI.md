@@ -57,7 +57,7 @@ Then on the Pi:
 cd /opt/docker/projects/victorStrikesBack
 ```
 
-## 3. Create `.env` with a strong admin token
+## 3. Create `.env` with bootstrap credentials for David
 
 On the Pi, in the same folder as `docker-compose.yml`:
 
@@ -67,19 +67,16 @@ cp .env.example .env
 nano .env   # or vim
 ```
 
-Set:
+Set **first-boot only** variables (used when the SQLite database has **no users** yet):
 
 ```env
-ADMIN_TOKEN=paste-a-long-random-secret-here
+BOOTSTRAP_DAVID_USERNAME=david
+BOOTSTRAP_DAVID_PASSWORD=use-a-strong-unique-password
 ```
 
-Generate one on the Pi:
+Pick a strong password (you can generate random bytes with `openssl rand -base64 24`). After the first deploy, log in on the website as David and create **Victor** and at least one **mediator** under **Controls → Add user**. You can remove or rotate `BOOTSTRAP_DAVID_PASSWORD` from `.env` later if you prefer (new databases on empty volumes would need bootstrap again).
 
-```bash
-openssl rand -hex 32
-```
-
-Paste that value as `ADMIN_TOKEN=...` in `.env`. Save the file.
+**Migrating from the old `ADMIN_TOKEN`-only setup:** the API no longer uses `ADMIN_TOKEN`. If you have an existing `strikes.db` with data but no `users` table, back up the volume, set bootstrap env, redeploy, then log in and recreate accounts. For a clean start you can remove the old volume: `docker compose down -v` (this **deletes** stored strikes).
 
 ## 4. Build and start
 
@@ -102,7 +99,7 @@ From another machine on the LAN:
 
 Example: `http://192.168.10.116:8080`
 
-In the app: **Controls → Unlock to change strikes** and enter the same string as `ADMIN_TOKEN`.
+In the app: **Log in** as David (or Victor / a mediator). David uses **Controls** to change strikes (with a required explanation) and to create other users.
 
 ## 6. Firewall (if enabled)
 
@@ -186,7 +183,7 @@ Anyone who can push to the tracked branches can trigger a deploy on the Pi. Rest
 | `permission denied` … `docker.sock` (Actions runner) | `sudo usermod -aG docker <runner-user>`, then `sudo systemctl restart actions.runner.*` (see section 8) |
 | `permission denied` on Docker (your shell) | `sudo usermod -aG docker $USER` and open a new SSH session |
 | Port 8080 in use | Change `8080:80` in `docker-compose.yml` to e.g. `8888:80` |
-| `ADMIN_TOKEN` empty | `PUT` returns 503; set `ADMIN_TOKEN` in `.env` and `docker compose up -d` again |
+| No David user / wrong password | Set `BOOTSTRAP_DAVID_*` for first boot on an empty DB, or log in with an existing David account |
 | Build fails on Pi (memory) | Build on a PC with `docker buildx build --platform linux/arm64` and load images, or add swap on the Pi |
 
 Strike data lives in the Docker volume `strikes-data` (SQLite under `/data` in the API container). It survives container rebuilds unless you remove the volume.
