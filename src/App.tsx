@@ -334,6 +334,12 @@ export default function App() {
 
       {!loading && !loadError && (
         <>
+          {count > 0 && (
+            <p className="text-cartoon-blue text-2xl sm:text-4xl md:text-5xl font-bold text-center max-w-[22ch] leading-tight mb-6 px-2">
+              Times Victor has tested my patience:
+            </p>
+          )}
+
           <div className="mb-8">
             <span className="text-6xl sm:text-8xl font-bold tabular-nums tracking-tight text-cartoon-blue">
               {count.toFixed(1)}
