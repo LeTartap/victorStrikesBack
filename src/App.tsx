@@ -1,11 +1,14 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   ChevronUp,
   ChevronDown,
   RotateCcw,
   LogIn,
   LogOut,
+  Pencil,
+  Trash2,
   UserPlus,
+  Users,
 } from "lucide-react";
 import { useStrikeCount } from "./useStrikeCount";
 import { useAuth } from "./useAuth";
@@ -13,6 +16,8 @@ import { apiFetch } from "./api";
 import { HistorySection, AppealModal } from "./HistorySection";
 import { MediatorAppeals } from "./MediatorAppeals";
 import { DavidAppealsList } from "./DavidAppealsList";
+
+type ApiUserRow = { id: number; username: string; role: string; created_at: string };
 
 function VictorStrikeIcon({ half = false }: { half?: boolean }) {
   return (
@@ -127,6 +132,12 @@ export default function App() {
   const [newPass, setNewPass] = useState("");
   const [newRole, setNewRole] = useState<"victor" | "mediator">("victor");
   const [userMsg, setUserMsg] = useState<string | null>(null);
+  const [users, setUsers] = useState<ApiUserRow[]>([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [editUser, setEditUser] = useState<ApiUserRow | null>(null);
+  const [editPass, setEditPass] = useState("");
+  const [editRole, setEditRole] = useState<"victor" | "mediator">("victor");
+  const [userManageBusy, setUserManageBusy] = useState(false);
 
   const isDavid = user?.role === "david";
   const isVictor = user?.role === "victor";
@@ -161,6 +172,24 @@ export default function App() {
     }
   };
 
+  const loadUsers = useCallback(async () => {
+    if (!isDavid) return;
+    setUsersLoading(true);
+    try {
+      const r = await apiFetch("/api/users");
+      if (r.ok) {
+        const j = (await r.json()) as { users: ApiUserRow[] };
+        setUsers(j.users ?? []);
+      }
+    } finally {
+      setUsersLoading(false);
+    }
+  }, [isDavid]);
+
+  useEffect(() => {
+    if (isDavid && panelOpen) void loadUsers();
+  }, [isDavid, panelOpen, loadUsers]);
+
   const createUser = async () => {
     setUserMsg(null);
     try {
@@ -180,8 +209,68 @@ export default function App() {
       setUserMsg(`Created ${newName.trim()}`);
       setNewName("");
       setNewPass("");
+      await loadUsers();
     } catch (e) {
       setUserMsg(e instanceof Error ? e.message : "Error");
+    }
+  };
+
+  const saveUserEdit = async () => {
+    if (!editUser) return;
+    const body: { password?: string; role?: string } = {};
+    if (editPass.trim()) body.password = editPass;
+    if (editRole !== editUser.role) body.role = editRole;
+    if (Object.keys(body).length === 0) {
+      setEditUser(null);
+      setEditPass("");
+      return;
+    }
+    setUserMsg(null);
+    setUserManageBusy(true);
+    try {
+      const r = await apiFetch(`/api/users/${editUser.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) {
+        const j = (await r.json().catch(() => ({}))) as { error?: string };
+        throw new Error(j.error ?? "Update failed");
+      }
+      setUserMsg(`Updated ${editUser.username}`);
+      setEditUser(null);
+      setEditPass("");
+      await loadUsers();
+    } catch (e) {
+      setUserMsg(e instanceof Error ? e.message : "Error");
+    } finally {
+      setUserManageBusy(false);
+    }
+  };
+
+  const removeUser = async (u: ApiUserRow) => {
+    if (u.role === "david") return;
+    if (
+      !confirm(
+        `Remove user "${u.username}"? Their appeals and mediator votes for this account will be deleted.`,
+      )
+    ) {
+      return;
+    }
+    setUserMsg(null);
+    setUserManageBusy(true);
+    try {
+      const r = await apiFetch(`/api/users/${u.id}`, { method: "DELETE" });
+      if (!r.ok) {
+        const j = (await r.json().catch(() => ({}))) as { error?: string };
+        throw new Error(j.error ?? "Delete failed");
+      }
+      setUserMsg(`Removed ${u.username}`);
+      await loadUsers();
+    } catch (e) {
+      setUserMsg(e instanceof Error ? e.message : "Error");
+    } finally {
+      setUserManageBusy(false);
     }
   };
 
@@ -426,6 +515,61 @@ export default function App() {
 
                     <div className="border-t border-dashed border-zinc-200 pt-4 mt-2">
                       <h3 className="text-cartoon-blue font-bold text-sm mb-2 flex items-center gap-2">
+                        <Users className="w-4 h-4" />
+                        Accounts
+                      </h3>
+                      {usersLoading ? (
+                        <p className="text-xs text-zinc-500">Loading users…</p>
+                      ) : (
+                        <ul className="flex flex-col gap-1.5 text-sm">
+                          {users.map((u) => (
+                            <li
+                              key={u.id}
+                              className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-zinc-200/80 px-2 py-1.5"
+                            >
+                              <span className="font-medium text-zinc-800">
+                                {u.username}{" "}
+                                <span className="text-zinc-500 font-normal">({u.role})</span>
+                              </span>
+                              {u.role === "david" ? (
+                                <span className="text-xs text-zinc-400">David account</span>
+                              ) : (
+                                <span className="flex items-center gap-1">
+                                  <button
+                                    type="button"
+                                    disabled={userManageBusy}
+                                    onClick={() => {
+                                      setEditUser(u);
+                                      setEditPass("");
+                                      setEditRole(u.role === "mediator" ? "mediator" : "victor");
+                                    }}
+                                    className="inline-flex items-center gap-0.5 px-2 py-1 rounded-md border border-cartoon-blue/30 text-cartoon-blue text-xs font-semibold cursor-pointer disabled:opacity-40"
+                                  >
+                                    <Pencil className="w-3 h-3" />
+                                    Edit
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={userManageBusy || u.id === user?.id}
+                                    onClick={() => void removeUser(u)}
+                                    className="inline-flex items-center gap-0.5 px-2 py-1 rounded-md border border-strike-red/40 text-strike-red text-xs font-semibold cursor-pointer disabled:opacity-40"
+                                    title={
+                                      u.id === user?.id ? "Cannot remove your own account" : undefined
+                                    }
+                                  >
+                                    <Trash2 className="w-3 h-3" />
+                                    Remove
+                                  </button>
+                                </span>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+
+                    <div className="border-t border-dashed border-zinc-200 pt-4 mt-2">
+                      <h3 className="text-cartoon-blue font-bold text-sm mb-2 flex items-center gap-2">
                         <UserPlus className="w-4 h-4" />
                         Add user (Victor or Mediator)
                       </h3>
@@ -476,6 +620,62 @@ export default function App() {
                   </p>
                 )}
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editUser && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="edit-user-title"
+        >
+          <div className="bg-white rounded-2xl border-2 border-cartoon-blue/25 shadow-xl max-w-sm w-full p-4 flex flex-col gap-3">
+            <h3 id="edit-user-title" className="font-bold text-cartoon-blue">
+              Edit {editUser.username}
+            </h3>
+            <p className="text-xs text-zinc-500">
+              Leave password blank to keep the current password. Change role between Victor and
+              Mediator if needed.
+            </p>
+            <input
+              type="password"
+              value={editPass}
+              onChange={(e) => setEditPass(e.target.value)}
+              className="border-2 border-cartoon-blue/20 rounded-lg px-2 py-1.5 text-sm"
+              placeholder="New password (min 6, optional)"
+              autoComplete="new-password"
+            />
+            <select
+              value={editRole}
+              onChange={(e) => setEditRole(e.target.value as "victor" | "mediator")}
+              className="border-2 border-cartoon-blue/20 rounded-lg px-2 py-1.5 text-sm"
+            >
+              <option value="victor">Victor</option>
+              <option value="mediator">Mediator</option>
+            </select>
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                type="button"
+                disabled={userManageBusy}
+                onClick={() => {
+                  setEditUser(null);
+                  setEditPass("");
+                }}
+                className="px-3 py-1.5 rounded-full text-sm border-2 border-zinc-300 text-zinc-600 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={userManageBusy}
+                onClick={() => void saveUserEdit()}
+                className="px-3 py-1.5 rounded-full text-sm font-semibold bg-cartoon-blue text-white cursor-pointer disabled:opacity-40"
+              >
+                Save
+              </button>
             </div>
           </div>
         </div>

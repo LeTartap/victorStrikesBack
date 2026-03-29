@@ -5,7 +5,7 @@ A lightweight, cartoon-styled web app that tracks disciplinary **strikes** for V
 ## Features
 
 - **Shared count** — One canonical strike total for all visitors.
-- **Roles** — `david` (change strikes, create users), `victor` (appeals), `mediator` (vote on appeals).
+- **Roles** — `david` (change strikes, manage users: create, edit password/role, remove Victor/mediator accounts), `victor` (appeals), `mediator` (vote on appeals).
 - **History** — Every strike change is logged with an explanation.
 - **Appeals** — Victor submits one appeal per history row; mediators vote **overturn** or **uphold**; when **all** mediators have voted, the side with more votes wins (ties uphold David’s change).
 - **Half strikes** — Steps of **0.5** or **1.0**; UI shows a clipped “half” Victor head for 0.5.
@@ -85,6 +85,8 @@ Vite proxies **`/api`** to `http://127.0.0.1:3000`. Open the URL Vite prints (e.
 | `POST` | `/api/auth/logout` | Session | |
 | `GET` | `/api/auth/me` | Session | |
 | `GET` / `POST` | `/api/users` | David only | List / create users (`victor` or `mediator`) |
+| `PATCH` | `/api/users/:id` | David only | Update password and/or role (`victor` \| `mediator`); cannot edit `david` accounts |
+| `DELETE` | `/api/users/:id` | David only | Remove a Victor or mediator; cannot remove `david` or yourself; deletes related appeals/votes |
 | `POST` | `/api/history/:id/appeals` | Victor | `{ message }` |
 | `GET` | `/api/appeals` | David / Victor / Mediator | Role-specific lists |
 | `POST` | `/api/appeals/:id/vote` | Mediator | `{ vote: "overturn" \| "uphold" }` |
@@ -114,7 +116,7 @@ Use **Caddy**, **Traefik**, or **Cloudflare Tunnel** in front of the stack for T
 ## Security
 
 - Passwords are hashed with **bcrypt**; sessions use an **httpOnly** cookie.
-- Do **not** commit `.env`. Anyone who can log in as David can change strikes and create users; mediators collectively decide appeals.
+- Do **not** commit `.env`. Anyone who can log in as David can change strikes and manage non-David user accounts; mediators collectively decide appeals.
 - Suitable for a **trusted group**, not high-assurance scenarios.
 
 ## License

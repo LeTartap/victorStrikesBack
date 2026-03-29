@@ -28,6 +28,7 @@ mkdirSync(dirname(SQLITE_PATH), { recursive: true });
 
 const db = new Database(SQLITE_PATH);
 db.pragma("journal_mode = WAL");
+db.pragma("foreign_keys = ON");
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
@@ -284,6 +285,67 @@ app.post("/api/users", async (request, reply) => {
   } catch {
     return reply.code(400).send({ error: "username taken" });
   }
+});
+
+app.patch("/api/users/:id", async (request, reply) => {
+  const user = getSessionUser(request);
+  if (!requireRole(user, ["david"])) return reply.code(403).send({ error: "Forbidden" });
+  const id = Number(request.params.id);
+  if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ error: "Invalid id" });
+
+  const target = db.prepare("SELECT id, role FROM users WHERE id = ?").get(id);
+  if (!target) return reply.code(404).send({ error: "Not found" });
+  if (target.role === "david") return reply.code(403).send({ error: "Cannot edit David accounts" });
+
+  const body = request.body;
+  if (typeof body !== "object" || body === null) {
+    return reply.code(400).send({ error: "Invalid body" });
+  }
+  const { password, role } = body;
+  const updates = [];
+  const vals = [];
+  if (password !== undefined) {
+    if (typeof password !== "string" || password.length < 6) {
+      return reply.code(400).send({ error: "password must be at least 6 characters" });
+    }
+    updates.push("password_hash = ?");
+    vals.push(bcrypt.hashSync(password, 10));
+  }
+  if (role !== undefined) {
+    if (typeof role !== "string" || !["victor", "mediator"].includes(role)) {
+      return reply.code(400).send({ error: "role must be victor or mediator" });
+    }
+    updates.push("role = ?");
+    vals.push(role);
+  }
+  if (updates.length === 0) return reply.code(400).send({ error: "password or role required" });
+  vals.push(id);
+  db.prepare(`UPDATE users SET ${updates.join(", ")} WHERE id = ?`).run(...vals);
+  const row = db.prepare("SELECT id, username, role, created_at FROM users WHERE id = ?").get(id);
+  return { user: row };
+});
+
+app.delete("/api/users/:id", async (request, reply) => {
+  const user = getSessionUser(request);
+  if (!requireRole(user, ["david"])) return reply.code(403).send({ error: "Forbidden" });
+  const id = Number(request.params.id);
+  if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ error: "Invalid id" });
+  if (id === user.id) return reply.code(400).send({ error: "Cannot delete your own account" });
+
+  const target = db.prepare("SELECT id, role FROM users WHERE id = ?").get(id);
+  if (!target) return reply.code(404).send({ error: "Not found" });
+  if (target.role === "david") return reply.code(403).send({ error: "Cannot delete David accounts" });
+
+  const tx = db.transaction(() => {
+    db.prepare(
+      "DELETE FROM appeal_votes WHERE appeal_id IN (SELECT id FROM appeals WHERE victor_id = ?)",
+    ).run(id);
+    db.prepare("DELETE FROM appeals WHERE victor_id = ?").run(id);
+    db.prepare("DELETE FROM appeal_votes WHERE mediator_id = ?").run(id);
+    db.prepare("DELETE FROM users WHERE id = ?").run(id);
+  });
+  tx();
+  return { ok: true };
 });
 
 app.put("/api/strikes", async (request, reply) => {
