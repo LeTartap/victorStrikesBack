@@ -158,9 +158,12 @@ GitHub’s cloud runners cannot reach a Pi on a private LAN. A **[self-hosted ru
 
 The workflow [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml) runs on **push** to **`main`** or **`master`** (and can be run manually via **Actions → Deploy to Raspberry Pi → Run workflow**). It:
 
-1. `cd` to `/opt/docker/projects/victorStrikesBack`
-2. `git fetch` and `git reset --hard` to match the branch that triggered the run (`origin/main` or `origin/master`)
-3. `docker compose up -d --build`
+1. **Fails early** if `/opt/docker/projects/victorStrikesBack/.env` is missing (so you don’t deploy with no bootstrap credentials on a fresh DB).
+2. `cd` to `/opt/docker/projects/victorStrikesBack`
+3. `git fetch` and `git reset --hard` to match the branch that triggered the run (`origin/main` or `origin/master`)
+4. `docker compose up -d --build`
+
+The workflow does **not** set `BOOTSTRAP_DAVID_*` or any API secrets — those must come from **`.env` on the Pi** (see section 3). GitHub repo secrets are not used unless you extend the workflow yourself.
 
 Your `.env` on the Pi is **not** overwritten; it stays next to `docker-compose.yml`.
 

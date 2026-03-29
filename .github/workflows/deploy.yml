@@ -1,3 +1,9 @@
+# Deploys by pulling this repo on the self-hosted runner and running docker compose.
+# Bootstrap credentials for David are NOT set here — they must live in a `.env` file
+# next to docker-compose.yml on the Pi (see .env.example and docs/DEPLOY-PI.md).
+# If `.env` is missing or BOOTSTRAP_* are empty, the API still starts but a fresh DB
+# will have no users until you add a proper `.env` and recreate the volume / DB.
+
 name: Deploy to Raspberry Pi
 
 on:
@@ -15,6 +21,16 @@ jobs:
   deploy:
     runs-on: self-hosted
     steps:
+      - name: Ensure deployment .env exists
+        env:
+          DEPLOY_PATH: /opt/docker/projects/victorStrikesBack
+        run: |
+          set -euo pipefail
+          if [ ! -f "$DEPLOY_PATH/.env" ]; then
+            echo "::error::No .env at $DEPLOY_PATH/.env — copy .env.example to .env on the Pi and set BOOTSTRAP_DAVID_USERNAME and BOOTSTRAP_DAVID_PASSWORD (see docs/DEPLOY-PI.md)."
+            exit 1
+          fi
+
       - name: Pull latest and rebuild containers
         env:
           DEPLOY_PATH: /opt/docker/projects/victorStrikesBack
