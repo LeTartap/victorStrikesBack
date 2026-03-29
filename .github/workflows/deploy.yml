@@ -1,0 +1,27 @@
+name: Deploy to Raspberry Pi
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-pi
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - name: Pull latest and rebuild containers
+        env:
+          DEPLOY_PATH: /opt/docker/projects/victorStrikesBack
+        run: |
+          set -euo pipefail
+          cd "$DEPLOY_PATH"
+          git fetch origin
+          git reset --hard "origin/${{ github.ref_name }}"
+          docker compose up -d --build
+          docker compose ps

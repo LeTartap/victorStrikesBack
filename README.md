@@ -83,7 +83,7 @@ If `ADMIN_TOKEN` is unset, `PUT` responds with **503**.
 
 ## Deploy with Docker Compose (e.g. Raspberry Pi)
 
-Step-by-step for a Pi (paths, `rsync`, firewall): see **[docs/DEPLOY-PI.md](docs/DEPLOY-PI.md)**.
+Step-by-step for a Pi (paths, `rsync`, firewall, optional **GitHub Actions self-hosted auto-deploy**): see **[docs/DEPLOY-PI.md](docs/DEPLOY-PI.md)**.
 
 1. Copy **`.env.example`** to **`.env`** in the repo root (same folder as `docker-compose.yml`).
 

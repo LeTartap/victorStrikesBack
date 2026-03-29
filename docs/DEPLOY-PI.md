@@ -115,7 +115,9 @@ sudo ufw reload
 
 ## 7. Updates after you change code
 
-On your Mac, push to git and on the Pi:
+**If you use auto-deploy (section 8):** push to `main` or `master` on GitHub; the Pi runner pulls and rebuilds for you.
+
+**Manual update** on the Pi:
 
 ```bash
 cd /opt/docker/projects/victorStrikesBack
@@ -124,6 +126,39 @@ docker compose up -d --build
 ```
 
 Or `rsync` again, then `docker compose up -d --build` on the Pi.
+
+## 8. Auto-deploy with a self-hosted GitHub Actions runner
+
+GitHub’s cloud runners cannot reach a Pi on a private LAN. A **[self-hosted runner](https://docs.github.com/en/actions/hosting-your-own-runners/managing-self-hosted-runners/about-self-hosted-runners)** on the Pi runs the deploy job locally after each push.
+
+### One-time setup
+
+1. On the Pi, ensure the project is a **git clone** at `/opt/docker/projects/victorStrikesBack` (same path as above), with `.env` present. The clone’s `origin` must point at this GitHub repo.
+2. The Linux user that will run the runner must be in the **`docker`** group (`newgrp docker` or re-login after `usermod`).
+3. In GitHub: repo **Settings → Actions → Runners → New self-hosted runner**. Choose Linux and arm64 (Raspberry Pi), then run the download and `config.sh` commands **on the Pi**. When asked for labels, you can add `pi` (optional); the workflow uses `runs-on: self-hosted` only, so any self-hosted runner for this repo will pick up the job.
+4. Start the runner: `./run.sh` (or install as a service per GitHub’s instructions so it survives reboot).
+
+### What the workflow does
+
+The workflow [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml) runs on **push** to **`main`** or **`master`** (and can be run manually via **Actions → Deploy to Raspberry Pi → Run workflow**). It:
+
+1. `cd` to `/opt/docker/projects/victorStrikesBack`
+2. `git fetch` and `git reset --hard` to match the branch that triggered the run (`origin/main` or `origin/master`)
+3. `docker compose up -d --build`
+
+Your `.env` on the Pi is **not** overwritten; it stays next to `docker-compose.yml`.
+
+### Custom deploy path
+
+If the project lives elsewhere, edit `DEPLOY_PATH` in `.github/workflows/deploy.yml` to match.
+
+### Private repository
+
+Configure the Pi clone with SSH **deploy keys** or credentials so `git fetch` works without prompts. For a **public** repo, no extra git auth is needed.
+
+### Security note
+
+Anyone who can push to the tracked branches can trigger a deploy on the Pi. Restrict write access to the repo and keep the runner machine trusted.
 
 ## Troubleshooting
 
