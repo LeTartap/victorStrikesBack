@@ -24,3 +24,8 @@ api.env
 *.njsproj
 *.sln
 *.sw?
+
+# Local SQLite (API dev)
+api/*.db
+api/*.db-wal
+api/*.db-shm
