@@ -252,9 +252,14 @@ await app.register(cors, {
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
 });
 
-// Run expiry on every request (lazy expiry — cheap, no cron needed).
+// Run expiry at most once per minute (lazy — no cron needed).
+let lastExpiryCheck = 0;
 app.addHook("onRequest", async () => {
-  expireStaleAppeals();
+  const now = Date.now();
+  if (now - lastExpiryCheck >= 60_000) {
+    lastExpiryCheck = now;
+    expireStaleAppeals();
+  }
 });
 
 // ── Strikes ────────────────────────────────────────────────────────────────

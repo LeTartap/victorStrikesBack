@@ -147,7 +147,7 @@ function CommentThread({
                       {c.author_username}
                     </span>
                     <span>·</span>
-                    <span>{new Date(c.created_at).toLocaleString()}</span>
+                    <span>{new Date(c.created_at + "Z").toLocaleString()}</span>
                     {user && (
                       <button
                         type="button"
@@ -172,11 +172,11 @@ function CommentThread({
                         {r.author_username}
                       </span>
                       <span>·</span>
-                      <span>{new Date(r.created_at).toLocaleString()}</span>
+                      <span>{new Date(r.created_at + "Z").toLocaleString()}</span>
                       {user && (
                         <button
                           type="button"
-                          onClick={() => startReply(c)}
+                          onClick={() => startReply(r)}
                           className="ml-auto flex items-center gap-0.5 text-zinc-400 hover:text-cartoon-blue cursor-pointer"
                         >
                           <Reply className="w-3 h-3" />

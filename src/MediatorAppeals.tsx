@@ -81,7 +81,7 @@ export function MediatorAppeals({ refreshKey }: { refreshKey: number }) {
       {voteErr && <p className="text-strike-red text-sm text-center">{voteErr}</p>}
       <ul className="space-y-4">
         {rows.map((a) => {
-          const deadline = new Date(new Date(a.created_at).getTime() + 24 * 60 * 60 * 1000);
+          const deadline = new Date(new Date(a.created_at + "Z").getTime() + 24 * 60 * 60 * 1000);
           const nowMs = Date.now();
           const hoursLeft = Math.max(0, Math.round((deadline.getTime() - nowMs) / 3_600_000));
           return (
