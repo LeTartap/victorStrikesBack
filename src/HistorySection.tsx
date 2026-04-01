@@ -54,10 +54,9 @@ function CommentThread({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   const load = useCallback(async () => {
-    if (!user) return;
     setLoading(true);
     try {
-      const r = await apiFetch(`/api/history/${historyId}/comments`);
+      const r = await fetch(`/api/history/${historyId}/comments`);
       if (r.ok) {
         const data = (await r.json()) as { comments: Comment[] };
         setComments(data.comments);
@@ -65,7 +64,7 @@ function CommentThread({
     } finally {
       setLoading(false);
     }
-  }, [historyId, user]);
+  }, [historyId]);
 
   // Load comments on mount and auto-expand if any exist.
   useEffect(() => {
