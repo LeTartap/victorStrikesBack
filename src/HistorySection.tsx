@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { MessageCircle, Reply, X } from "lucide-react";
 import type { AuthUser } from "./useAuth";
 import { apiFetch } from "./api";
@@ -53,7 +53,7 @@ function CommentThread({
   const [postErr, setPostErr] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     if (!user) return;
     setLoading(true);
     try {
@@ -65,13 +65,12 @@ function CommentThread({
     } finally {
       setLoading(false);
     }
-  };
+  }, [historyId, user]);
 
   // Load comments on mount and auto-expand if any exist.
   useEffect(() => {
-    if (!user) return;
     load().then(() => {}).catch(() => {});
-  }, [historyId, user]);
+  }, [load]);
 
   useEffect(() => {
     if (comments.length > 0) setExpanded(true);
