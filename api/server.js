@@ -642,8 +642,6 @@ app.post("/api/appeals/:aid/vote", async (request, reply) => {
 // ── History comments ───────────────────────────────────────────────────────
 
 app.get("/api/history/:hid/comments", async (request, reply) => {
-  const user = getSessionUser(request);
-  if (!user) return reply.code(401).send({ error: "Not logged in" });
   const hid = Number(request.params.hid);
   if (!Number.isInteger(hid) || hid <= 0) return reply.code(400).send({ error: "Invalid id" });
 
