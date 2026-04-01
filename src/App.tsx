@@ -9,6 +9,7 @@ import {
   Trash2,
   UserPlus,
   Users,
+  KeyRound,
 } from "lucide-react";
 import { useStrikeCount } from "./useStrikeCount";
 import { useAuth } from "./useAuth";
@@ -18,6 +19,110 @@ import { MediatorAppeals } from "./MediatorAppeals";
 import { DavidAppealsList } from "./DavidAppealsList";
 
 type ApiUserRow = { id: number; username: string; role: string; created_at: string };
+
+// ── Change-password modal (all roles) ─────────────────────────────────────
+function ChangePasswordModal({ onClose }: { onClose: () => void }) {
+  const [cur, setCur] = useState("");
+  const [nw, setNw] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [ok, setOk] = useState(false);
+
+  const submit = async () => {
+    setErr(null);
+    if (nw.length < 6) {
+      setErr("New password must be at least 6 characters");
+      return;
+    }
+    setBusy(true);
+    try {
+      const r = await apiFetch("/api/auth/change-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ current_password: cur, new_password: nw }),
+      });
+      if (!r.ok) {
+        const j = (await r.json().catch(() => ({}))) as { error?: string };
+        throw new Error(j.error ?? "Failed");
+      }
+      setOk(true);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-[110] flex items-center justify-center bg-black/45 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="chpw-title"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="bg-white rounded-2xl border-2 border-cartoon-blue/25 shadow-xl max-w-sm w-full p-5 flex flex-col gap-3">
+        <h3 id="chpw-title" className="font-bold text-cartoon-blue text-lg">
+          Change my password
+        </h3>
+        {ok ? (
+          <>
+            <p className="text-mint font-semibold text-sm">Password changed successfully!</p>
+            <button
+              type="button"
+              onClick={onClose}
+              className="self-end px-4 py-2 rounded-full bg-cartoon-blue text-white text-sm font-semibold cursor-pointer"
+            >
+              Close
+            </button>
+          </>
+        ) : (
+          <>
+            <input
+              type="password"
+              value={cur}
+              onChange={(e) => setCur(e.target.value)}
+              className="border-2 border-cartoon-blue/20 rounded-lg px-2 py-1.5 text-sm"
+              placeholder="Current password"
+              autoComplete="current-password"
+            />
+            <input
+              type="password"
+              value={nw}
+              onChange={(e) => setNw(e.target.value)}
+              className="border-2 border-cartoon-blue/20 rounded-lg px-2 py-1.5 text-sm"
+              placeholder="New password (min 6)"
+              autoComplete="new-password"
+            />
+            {err && <p className="text-strike-red text-sm">{err}</p>}
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={onClose}
+                className="px-3 py-1.5 rounded-full text-sm border-2 border-zinc-300 text-zinc-600 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={busy || !cur || !nw}
+                onClick={() => void submit()}
+                className="px-3 py-1.5 rounded-full text-sm font-semibold bg-cartoon-blue text-white cursor-pointer disabled:opacity-40"
+              >
+                Save
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Strike display ─────────────────────────────────────────────────────────
 
 function VictorStrikeIcon({ half = false }: { half?: boolean }) {
   return (
@@ -74,9 +179,7 @@ function StrikeDisplay({ count }: { count: number }) {
 
   return (
     <div className="relative inline-flex items-center justify-center">
-      <div className="flex items-center gap-2 sm:gap-4">
-        {coreIcons}
-      </div>
+      <div className="flex items-center gap-2 sm:gap-4">{coreIcons}</div>
 
       {overflowIcons.length > 0 && (
         <div
@@ -105,28 +208,41 @@ function TimeoutBanner() {
   );
 }
 
+// ── App ────────────────────────────────────────────────────────────────────
+
 export default function App() {
   const { user, loading: authLoading, login, logout } = useAuth();
-  const {
-    count,
-    loading,
-    loadError,
-    add,
-    subtract,
-    reset,
-    refetch,
-  } = useStrikeCount();
+  const { count, loading, loadError, refetch } = useStrikeCount();
 
-  const [mutationError, setMutationError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
+  const [showChangePw, setShowChangePw] = useState(false);
   const [loginUser, setLoginUser] = useState("");
   const [loginPass, setLoginPass] = useState("");
   const [loginErr, setLoginErr] = useState<string | null>(null);
-  const [explanation, setExplanation] = useState("");
   const [historyKey, setHistoryKey] = useState(0);
   const [appealHistId, setAppealHistId] = useState<number | null>(null);
+
+  // David strike controls — staged local value + explanation
+  const [pendingCount, setPendingCount] = useState<number | null>(null);
+  const [explanation, setExplanation] = useState("");
+  const [mutationError, setMutationError] = useState<string | null>(null);
+
+  // When count loads, sync pendingCount
+  useEffect(() => {
+    if (!loading && count != null && pendingCount === null) {
+      setPendingCount(count);
+    }
+  }, [loading, count, pendingCount]);
+
+  // Reset staged value to current live count if panel is closed without confirming
+  useEffect(() => {
+    if (!panelOpen) {
+      setPendingCount(count ?? null);
+      setMutationError(null);
+    }
+  }, [panelOpen, count]);
 
   const [newName, setNewName] = useState("");
   const [newPass, setNewPass] = useState("");
@@ -145,11 +261,40 @@ export default function App() {
 
   const bumpHistory = () => setHistoryKey((k) => k + 1);
 
-  const runMutation = async (fn: () => Promise<void>) => {
+  // ── David strike mutations ──────────────────────────────────────────────
+  const adjustPending = (delta: number) => {
+    setPendingCount((prev) => {
+      const base = prev ?? count ?? 0;
+      return Math.max(0, Math.round((base + delta) * 2) / 2);
+    });
+    setMutationError(null);
+  };
+
+  const resetPending = () => {
+    setPendingCount(0);
+    setMutationError(null);
+  };
+
+  const confirmStrikeChange = async () => {
+    if (pendingCount === null) return;
+    const exp = explanation.trim();
+    if (!exp) {
+      setMutationError("A reason is required before confirming.");
+      return;
+    }
     setMutationError(null);
     setBusy(true);
     try {
-      await fn();
+      const r = await apiFetch("/api/strikes", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ count: pendingCount, explanation: exp }),
+      });
+      if (!r.ok) {
+        const j = (await r.json().catch(() => ({}))) as { error?: string };
+        throw new Error(j.error ?? "Failed");
+      }
+      setExplanation("");
       bumpHistory();
       await refetch();
     } catch (e) {
@@ -159,19 +304,7 @@ export default function App() {
     }
   };
 
-  const expOk = explanation.trim().length > 0;
-
-  const handleLogin = async () => {
-    setLoginErr(null);
-    try {
-      await login(loginUser.trim(), loginPass);
-      setShowLogin(false);
-      setLoginPass("");
-    } catch (e) {
-      setLoginErr(e instanceof Error ? e.message : "Login failed");
-    }
-  };
-
+  // ── User management ────────────────────────────────────────────────────
   const loadUsers = useCallback(async () => {
     if (!isDavid) return;
     setUsersLoading(true);
@@ -252,11 +385,10 @@ export default function App() {
     if (u.role === "david") return;
     if (
       !confirm(
-        `Remove user "${u.username}"? Their appeals and mediator votes for this account will be deleted.`,
+        `Remove user "${u.username}"? Their appeals and mediator votes will be deleted.`,
       )
-    ) {
+    )
       return;
-    }
     setUserMsg(null);
     setUserManageBusy(true);
     try {
@@ -288,8 +420,14 @@ export default function App() {
     bumpHistory();
   };
 
+  // Displayed staged count (while editing) or live count
+  const displayedCount = pendingCount ?? count ?? 0;
+  const hasChange = pendingCount !== null && pendingCount !== count;
+  const expOk = explanation.trim().length > 0;
+
   return (
     <div className="min-h-dvh flex flex-col items-center px-4 pb-32 select-none">
+      {/* Top bar */}
       <div className="w-full max-w-2xl flex justify-end items-center gap-2 pt-3 mb-2">
         {authLoading ? (
           <span className="text-zinc-400 text-sm">…</span>
@@ -298,6 +436,14 @@ export default function App() {
             <span className="text-zinc-600 text-sm">
               {user.username} ({user.role})
             </span>
+            <button
+              type="button"
+              onClick={() => setShowChangePw(true)}
+              title="Change my password"
+              className="flex items-center gap-1 px-2 py-1.5 rounded-full border-2 border-zinc-300 text-sm text-zinc-600 cursor-pointer"
+            >
+              <KeyRound className="w-4 h-4" />
+            </button>
             <button
               type="button"
               onClick={() => logout()}
@@ -380,6 +526,7 @@ export default function App() {
         </>
       )}
 
+      {/* Login modal */}
       {showLogin && (
         <div
           className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 px-4"
@@ -418,7 +565,16 @@ export default function App() {
               </button>
               <button
                 type="button"
-                onClick={() => void handleLogin()}
+                onClick={async () => {
+                  setLoginErr(null);
+                  try {
+                    await login(loginUser.trim(), loginPass);
+                    setShowLogin(false);
+                    setLoginPass("");
+                  } catch (e) {
+                    setLoginErr(e instanceof Error ? e.message : "Login failed");
+                  }
+                }}
                 disabled={!loginUser.trim() || !loginPass}
                 className="px-4 py-2 rounded-full bg-cartoon-blue text-white font-semibold text-sm cursor-pointer disabled:opacity-40"
               >
@@ -429,6 +585,10 @@ export default function App() {
         </div>
       )}
 
+      {/* Change password modal */}
+      {showChangePw && <ChangePasswordModal onClose={() => setShowChangePw(false)} />}
+
+      {/* Controls drawer */}
       {!loadError && (
         <div className="fixed bottom-0 left-0 right-0 z-50">
           <div className="max-w-lg mx-auto">
@@ -458,61 +618,87 @@ export default function App() {
               >
                 {isDavid && (
                   <>
+                    {/* ── Staged strike count ── */}
+                    <div className="flex flex-col items-center gap-1">
+                      <p className="text-xs text-zinc-500 text-center">
+                        Adjust the count, enter a reason, then press{" "}
+                        <strong>Confirm</strong> to save.
+                      </p>
+                      <div className="flex items-center gap-3 mt-1">
+                        <button
+                          type="button"
+                          disabled={busy || displayedCount <= 0}
+                          onClick={() => adjustPending(-0.5)}
+                          className="w-10 h-10 rounded-full bg-coral text-white font-bold text-xl shadow-[0_3px_0_var(--color-coral-dark)] active:translate-y-[2px] active:shadow-none disabled:opacity-30 cursor-pointer disabled:pointer-events-none flex items-center justify-center"
+                        >
+                          −
+                        </button>
+                        <span className="text-3xl font-bold tabular-nums text-cartoon-blue min-w-[4rem] text-center">
+                          {displayedCount.toFixed(1)}
+                        </span>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => adjustPending(0.5)}
+                          className="w-10 h-10 rounded-full bg-mint text-white font-bold text-xl shadow-[0_3px_0_var(--color-mint-dark)] active:translate-y-[2px] active:shadow-none disabled:opacity-30 cursor-pointer disabled:pointer-events-none flex items-center justify-center"
+                        >
+                          +
+                        </button>
+                      </div>
+                      {hasChange && (
+                        <p className="text-xs text-zinc-500">
+                          Changing from {count?.toFixed(1)} → {displayedCount.toFixed(1)}
+                        </p>
+                      )}
+                    </div>
+
                     <label className="block text-sm text-zinc-600 font-medium">
-                      Reason for strike change (required)
+                      Reason for change (required)
                     </label>
                     <textarea
                       value={explanation}
-                      onChange={(e) => setExplanation(e.target.value)}
+                      onChange={(e) => setExplanation(e.target.value.slice(0, 500))}
                       className="w-full border-2 border-cartoon-blue/30 rounded-xl px-3 py-2 text-sm min-h-[72px]"
                       placeholder="Why are you changing the count?"
                     />
-                    {mutationError && (
-                      <p className="text-center text-strike-red text-sm font-medium">{mutationError}</p>
-                    )}
-                    <div className="flex flex-wrap items-center justify-center gap-3">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <button
                         type="button"
-                        disabled={busy || !expOk}
-                        onClick={() =>
-                          runMutation(() => add(0.5, explanation.trim()))
-                        }
-                        className="px-5 py-2.5 rounded-full font-semibold text-sm text-white bg-mint shadow-[0_4px_0_var(--color-mint-dark)] active:translate-y-[3px] active:shadow-none disabled:opacity-40 cursor-pointer disabled:pointer-events-none"
+                        disabled={busy || !hasChange || !expOk}
+                        onClick={() => void confirmStrikeChange()}
+                        className="px-5 py-2.5 rounded-full font-semibold text-sm text-white bg-cartoon-blue shadow-[0_4px_0_#2563eb] active:translate-y-[3px] active:shadow-none disabled:opacity-40 cursor-pointer disabled:pointer-events-none"
                       >
-                        + 0.5 Strike
+                        Confirm change
                       </button>
                       <button
                         type="button"
-                        disabled={busy || !expOk}
-                        onClick={() => runMutation(() => add(1, explanation.trim()))}
-                        className="px-5 py-2.5 rounded-full font-semibold text-sm text-white bg-mint shadow-[0_4px_0_var(--color-mint-dark)] active:translate-y-[3px] active:shadow-none disabled:opacity-40 cursor-pointer disabled:pointer-events-none"
-                      >
-                        + 1 Strike
-                      </button>
-                      <button
-                        type="button"
-                        disabled={busy || !expOk || count <= 0}
-                        onClick={() =>
-                          runMutation(() => subtract(0.5, explanation.trim()))
-                        }
-                        className="px-5 py-2.5 rounded-full font-semibold text-sm text-white bg-coral shadow-[0_4px_0_var(--color-coral-dark)] active:translate-y-[3px] active:shadow-none disabled:opacity-30 cursor-pointer disabled:pointer-events-none"
-                      >
-                        − 0.5 Strike
-                      </button>
-                      <button
-                        type="button"
-                        disabled={busy || !expOk || count === 0}
-                        onClick={() => runMutation(() => reset(explanation.trim()))}
-                        className="px-5 py-2.5 rounded-full font-semibold text-sm transition-all cursor-pointer
-                                    border-2 border-cartoon-blue text-cartoon-blue
-                                    hover:bg-cartoon-blue/10 flex items-center gap-1.5
-                                    disabled:opacity-30 disabled:pointer-events-none"
+                        disabled={busy || displayedCount === 0}
+                        onClick={() => {
+                          resetPending();
+                        }}
+                        className="px-4 py-2 rounded-full text-sm border-2 border-cartoon-blue text-cartoon-blue hover:bg-cartoon-blue/10 flex items-center gap-1 disabled:opacity-30 cursor-pointer disabled:pointer-events-none"
                       >
                         <RotateCcw className="w-3.5 h-3.5" />
-                        Reset
+                        Reset to 0
                       </button>
+                      {hasChange && (
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => setPendingCount(count ?? 0)}
+                          className="px-3 py-1.5 rounded-full text-xs border border-zinc-300 text-zinc-600 cursor-pointer"
+                        >
+                          Undo
+                        </button>
+                      )}
                     </div>
+                    {mutationError && (
+                      <p className="text-center text-strike-red text-sm font-medium">
+                        {mutationError}
+                      </p>
+                    )}
 
+                    {/* ── Accounts list ── */}
                     <div className="border-t border-dashed border-zinc-200 pt-4 mt-2">
                       <h3 className="text-cartoon-blue font-bold text-sm mb-2 flex items-center gap-2">
                         <Users className="w-4 h-4" />
@@ -554,7 +740,9 @@ export default function App() {
                                     onClick={() => void removeUser(u)}
                                     className="inline-flex items-center gap-0.5 px-2 py-1 rounded-md border border-strike-red/40 text-strike-red text-xs font-semibold cursor-pointer disabled:opacity-40"
                                     title={
-                                      u.id === user?.id ? "Cannot remove your own account" : undefined
+                                      u.id === user?.id
+                                        ? "Cannot remove your own account"
+                                        : undefined
                                     }
                                   >
                                     <Trash2 className="w-3 h-3" />
@@ -568,6 +756,7 @@ export default function App() {
                       )}
                     </div>
 
+                    {/* ── Add user ── */}
                     <div className="border-t border-dashed border-zinc-200 pt-4 mt-2">
                       <h3 className="text-cartoon-blue font-bold text-sm mb-2 flex items-center gap-2">
                         <UserPlus className="w-4 h-4" />
@@ -590,9 +779,7 @@ export default function App() {
                         />
                         <select
                           value={newRole}
-                          onChange={(e) =>
-                            setNewRole(e.target.value as "victor" | "mediator")
-                          }
+                          onChange={(e) => setNewRole(e.target.value as "victor" | "mediator")}
                           className="border-2 border-cartoon-blue/20 rounded-lg px-2 py-1.5 text-sm"
                         >
                           <option value="victor">Victor</option>
@@ -625,6 +812,7 @@ export default function App() {
         </div>
       )}
 
+      {/* Edit user modal (David) */}
       {editUser && (
         <div
           className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4"

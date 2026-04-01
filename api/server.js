@@ -14,6 +14,18 @@ const BOOTSTRAP_USER = process.env.BOOTSTRAP_DAVID_USERNAME?.trim();
 const BOOTSTRAP_PASS = process.env.BOOTSTRAP_DAVID_PASSWORD ?? "";
 const COOKIE_NAME = "victor_session";
 
+// ── Input length limits ────────────────────────────────────────────────────
+const MAX_APPEAL_LEN = 1000;
+const MAX_COMMENT_LEN = 1000;
+const MAX_EXPLANATION_LEN = 500;
+const MAX_OPEN_APPEALS_PER_VICTOR = 2;
+// Appeals expire 24 h after creation; resolved by threshold or default uphold.
+const APPEAL_EXPIRY_HOURS = 24;
+
+function trim(s, max) {
+  return typeof s === "string" ? s.trim().slice(0, max) : s;
+}
+
 function validHalfStepCount(n) {
   if (typeof n !== "number" || !Number.isFinite(n) || n < 0) return false;
   const rounded = Math.round(n * 2) / 2;
@@ -81,7 +93,25 @@ db.exec(`
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE(appeal_id, mediator_id)
   );
+
+  CREATE TABLE IF NOT EXISTS history_comments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    history_id INTEGER NOT NULL REFERENCES strike_history(id) ON DELETE CASCADE,
+    author_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    parent_id INTEGER REFERENCES history_comments(id) ON DELETE CASCADE,
+    body TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_history_comments_hid ON history_comments(history_id);
 `);
+
+// ── One-time data cleanup: trim oversized existing texts ───────────────────
+db.prepare(
+  `UPDATE appeals SET message = substr(message, 1, ?) WHERE length(message) > ?`,
+).run(MAX_APPEAL_LEN, MAX_APPEAL_LEN);
+db.prepare(
+  `UPDATE strike_history SET explanation = substr(explanation, 1, ?) WHERE length(explanation) > ?`,
+).run(MAX_EXPLANATION_LEN, MAX_EXPLANATION_LEN);
 
 const userCount = db.prepare("SELECT COUNT(*) AS c FROM users").get().c;
 if (userCount === 0 && BOOTSTRAP_USER && BOOTSTRAP_PASS) {
@@ -129,16 +159,51 @@ const mediatorCountStmt = db.prepare(
   "SELECT COUNT(*) AS c FROM users WHERE role = 'mediator'",
 );
 
+// ── Appeal resolution ──────────────────────────────────────────────────────
+// Resolves an open appeal if a side reaches the threshold (ceil(M/2)).
+// Pass `reason` to log the cause of resolution (e.g. 'vote' or 'timeout').
+function resolveAppeal(appealId, result /* 'overturn' | 'uphold' */, reason) {
+  const appeal = db
+    .prepare(
+      `SELECT a.id, a.history_id, h.previous_count, h.new_count
+       FROM appeals a
+       JOIN strike_history h ON h.id = a.history_id
+       WHERE a.id = ? AND a.status = 'open'`,
+    )
+    .get(appealId);
+  if (!appeal) return;
+
+  const david = db.prepare("SELECT id FROM users WHERE role = 'david' LIMIT 1").get();
+  if (!david) return;
+
+  if (result === "overturn") {
+    const current = getCountStmt.get().count;
+    const target = appeal.previous_count;
+    putCountStmt.run(target);
+    db.prepare(
+      `INSERT INTO strike_history (previous_count, new_count, explanation, created_by)
+       VALUES (?, ?, ?, ?)`,
+    ).run(
+      current,
+      target,
+      `Appeal #${appealId} overturned by mediators (${reason}).`,
+      david.id,
+    );
+    db.prepare(
+      `UPDATE appeals SET status = 'resolved_overturn', resolved_at = datetime('now') WHERE id = ?`,
+    ).run(appealId);
+  } else {
+    db.prepare(
+      `UPDATE appeals SET status = 'resolved_uphold', resolved_at = datetime('now') WHERE id = ?`,
+    ).run(appealId);
+  }
+}
+
 function tryResolveAppeal(appealId) {
   const M = mediatorCountStmt.get().c;
   if (M === 0) return;
 
-  const voted = db
-    .prepare(
-      "SELECT COUNT(DISTINCT mediator_id) AS c FROM appeal_votes WHERE appeal_id = ?",
-    )
-    .get(appealId).c;
-  if (voted < M) return;
+  const threshold = Math.ceil(M / 2);
 
   const tallies = db
     .prepare(
@@ -152,40 +217,25 @@ function tryResolveAppeal(appealId) {
     if (row.vote === "uphold") uphold = row.c;
   }
 
-  const appeal = db
+  if (overturn >= threshold) {
+    resolveAppeal(appealId, "overturn", "majority vote");
+  } else if (uphold >= threshold) {
+    resolveAppeal(appealId, "uphold", "majority vote");
+  }
+  // Otherwise not enough votes yet; expiry will handle it later.
+}
+
+// Expire open appeals older than APPEAL_EXPIRY_HOURS → default uphold.
+function expireStaleAppeals() {
+  const stale = db
     .prepare(
-      `SELECT a.id, a.history_id, h.previous_count, h.new_count
-       FROM appeals a
-       JOIN strike_history h ON h.id = a.history_id
-       WHERE a.id = ? AND a.status = 'open'`,
+      `SELECT id FROM appeals
+       WHERE status = 'open'
+         AND created_at <= datetime('now', ?)`,
     )
-    .get(appealId);
-  if (!appeal) return;
-
-  const david = db.prepare("SELECT id FROM users WHERE role = 'david' LIMIT 1").get();
-  if (!david) return;
-  const davidId = david.id;
-
-  if (overturn > uphold) {
-    const current = getCountStmt.get().count;
-    const target = appeal.previous_count;
-    putCountStmt.run(target);
-    db.prepare(
-      `INSERT INTO strike_history (previous_count, new_count, explanation, created_by)
-       VALUES (?, ?, ?, ?)`,
-    ).run(
-      current,
-      target,
-      `Appeal #${appealId} approved by mediators (vote overturned the change).`,
-      davidId,
-    );
-    db.prepare(
-      `UPDATE appeals SET status = 'resolved_overturn', resolved_at = datetime('now') WHERE id = ?`,
-    ).run(appealId);
-  } else {
-    db.prepare(
-      `UPDATE appeals SET status = 'resolved_uphold', resolved_at = datetime('now') WHERE id = ?`,
-    ).run(appealId);
+    .all(`-${APPEAL_EXPIRY_HOURS} hours`);
+  for (const { id } of stale) {
+    resolveAppeal(id, "uphold", `24h timeout — no majority reached`);
   }
 }
 
@@ -199,13 +249,78 @@ await app.register(cookie, {
 await app.register(cors, {
   origin: true,
   credentials: true,
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
 });
+
+// Run expiry at most once per minute (lazy — no cron needed).
+let lastExpiryCheck = 0;
+app.addHook("onRequest", async () => {
+  const now = Date.now();
+  if (now - lastExpiryCheck >= 60_000) {
+    lastExpiryCheck = now;
+    expireStaleAppeals();
+  }
+});
+
+// ── Strikes ────────────────────────────────────────────────────────────────
 
 app.get("/api/strikes", async () => {
   const row = getCountStmt.get();
   return { count: row.count };
 });
+
+app.put("/api/strikes", async (request, reply) => {
+  const user = getSessionUser(request);
+  if (!requireRole(user, ["david"])) return reply.code(403).send({ error: "Forbidden" });
+  const body = request.body;
+  if (typeof body !== "object" || body === null) {
+    return reply.code(400).send({ error: "Invalid body" });
+  }
+  const { count, explanation } = body;
+  if (typeof count !== "number" || typeof explanation !== "string") {
+    return reply.code(400).send({ error: "count and explanation required" });
+  }
+  const exp = trim(explanation, MAX_EXPLANATION_LEN);
+  if (!exp) {
+    return reply.code(400).send({ error: "explanation must not be empty" });
+  }
+  if (!validHalfStepCount(count)) {
+    return reply.code(400).send({ error: "count must be a non-negative multiple of 0.5" });
+  }
+  const next = clampHalf(count);
+  const prev = getCountStmt.get().count;
+  if (prev === next) {
+    return reply.code(400).send({ error: "no change" });
+  }
+  putCountStmt.run(next);
+  db.prepare(
+    `INSERT INTO strike_history (previous_count, new_count, explanation, created_by)
+     VALUES (?, ?, ?, ?)`,
+  ).run(prev, next, exp, user.id);
+  return { count: next };
+});
+
+// ── History ────────────────────────────────────────────────────────────────
+
+app.get("/api/history", async (request) => {
+  const limit = Math.min(200, Math.max(1, Number(request.query.limit) || 50));
+  const offset = Math.max(0, Number(request.query.offset) || 0);
+  const rows = db
+    .prepare(
+      `SELECT h.id, h.previous_count, h.new_count, h.explanation, h.created_at,
+              u.username AS actor_username,
+              a.id AS appeal_id, a.status AS appeal_status, a.message AS appeal_message
+       FROM strike_history h
+       JOIN users u ON u.id = h.created_by
+       LEFT JOIN appeals a ON a.history_id = h.id
+       ORDER BY h.id DESC
+       LIMIT ? OFFSET ?`,
+    )
+    .all(limit, offset);
+  return { entries: rows };
+});
+
+// ── Auth ───────────────────────────────────────────────────────────────────
 
 app.post("/api/auth/login", async (request, reply) => {
   const body = request.body;
@@ -247,6 +362,32 @@ app.get("/api/auth/me", async (request, reply) => {
   if (!user) return reply.code(401).send({ error: "Not logged in" });
   return { user };
 });
+
+// Change own password — any authenticated role.
+app.post("/api/auth/change-password", async (request, reply) => {
+  const user = getSessionUser(request);
+  if (!user) return reply.code(401).send({ error: "Not logged in" });
+  const body = request.body;
+  if (typeof body !== "object" || body === null) {
+    return reply.code(400).send({ error: "Invalid body" });
+  }
+  const { current_password, new_password } = body;
+  if (typeof current_password !== "string" || typeof new_password !== "string") {
+    return reply.code(400).send({ error: "current_password and new_password required" });
+  }
+  const row = db.prepare("SELECT * FROM users WHERE id = ?").get(user.id);
+  if (!row || !bcrypt.compareSync(current_password, row.password_hash)) {
+    return reply.code(401).send({ error: "Current password is incorrect" });
+  }
+  if (new_password.length < 6) {
+    return reply.code(400).send({ error: "new password must be at least 6 characters" });
+  }
+  const hash = bcrypt.hashSync(new_password, 10);
+  db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(hash, user.id);
+  return { ok: true };
+});
+
+// ── User management (David only) ───────────────────────────────────────────
 
 app.get("/api/users", async (request, reply) => {
   const user = getSessionUser(request);
@@ -348,54 +489,7 @@ app.delete("/api/users/:id", async (request, reply) => {
   return { ok: true };
 });
 
-app.put("/api/strikes", async (request, reply) => {
-  const user = getSessionUser(request);
-  if (!requireRole(user, ["david"])) return reply.code(403).send({ error: "Forbidden" });
-  const body = request.body;
-  if (typeof body !== "object" || body === null) {
-    return reply.code(400).send({ error: "Invalid body" });
-  }
-  const { count, explanation } = body;
-  if (typeof count !== "number" || typeof explanation !== "string") {
-    return reply.code(400).send({ error: "count and explanation required" });
-  }
-  const exp = explanation.trim();
-  if (!exp) {
-    return reply.code(400).send({ error: "explanation must not be empty" });
-  }
-  if (!validHalfStepCount(count)) {
-    return reply.code(400).send({ error: "count must be a non-negative multiple of 0.5" });
-  }
-  const next = clampHalf(count);
-  const prev = getCountStmt.get().count;
-  if (prev === next) {
-    return reply.code(400).send({ error: "no change" });
-  }
-  putCountStmt.run(next);
-  db.prepare(
-    `INSERT INTO strike_history (previous_count, new_count, explanation, created_by)
-     VALUES (?, ?, ?, ?)`,
-  ).run(prev, next, exp, user.id);
-  return { count: next };
-});
-
-app.get("/api/history", async (request) => {
-  const limit = Math.min(200, Math.max(1, Number(request.query.limit) || 50));
-  const offset = Math.max(0, Number(request.query.offset) || 0);
-  const rows = db
-    .prepare(
-      `SELECT h.id, h.previous_count, h.new_count, h.explanation, h.created_at,
-              u.username AS actor_username,
-              a.id AS appeal_id, a.status AS appeal_status, a.message AS appeal_message
-       FROM strike_history h
-       JOIN users u ON u.id = h.created_by
-       LEFT JOIN appeals a ON a.history_id = h.id
-       ORDER BY h.id DESC
-       LIMIT ? OFFSET ?`,
-    )
-    .all(limit, offset);
-  return { entries: rows };
-});
+// ── Appeals ────────────────────────────────────────────────────────────────
 
 app.post("/api/history/:hid/appeals", async (request, reply) => {
   const user = getSessionUser(request);
@@ -405,11 +499,22 @@ app.post("/api/history/:hid/appeals", async (request, reply) => {
   if (!hist) return reply.code(404).send({ error: "history not found" });
   const existing = db.prepare("SELECT id FROM appeals WHERE history_id = ?").get(hid);
   if (existing) return reply.code(400).send({ error: "An appeal already exists for this entry" });
+
+  // Max 2 simultaneous open appeals per victor.
+  const openCount = db
+    .prepare(`SELECT COUNT(*) AS c FROM appeals WHERE victor_id = ? AND status = 'open'`)
+    .get(user.id).c;
+  if (openCount >= MAX_OPEN_APPEALS_PER_VICTOR) {
+    return reply.code(400).send({
+      error: `You already have ${MAX_OPEN_APPEALS_PER_VICTOR} open appeals. Wait for one to resolve before submitting another.`,
+    });
+  }
+
   const body = request.body;
   if (typeof body !== "object" || body === null || typeof body.message !== "string") {
     return reply.code(400).send({ error: "message required" });
   }
-  const msg = body.message.trim();
+  const msg = trim(body.message, MAX_APPEAL_LEN);
   if (!msg) return reply.code(400).send({ error: "message must not be empty" });
   const r = db
     .prepare(
@@ -532,6 +637,73 @@ app.post("/api/appeals/:aid/vote", async (request, reply) => {
 
   tryResolveAppeal(aid);
   return { ok: true };
+});
+
+// ── History comments ───────────────────────────────────────────────────────
+
+app.get("/api/history/:hid/comments", async (request, reply) => {
+  const user = getSessionUser(request);
+  if (!user) return reply.code(401).send({ error: "Not logged in" });
+  const hid = Number(request.params.hid);
+  if (!Number.isInteger(hid) || hid <= 0) return reply.code(400).send({ error: "Invalid id" });
+
+  const rows = db
+    .prepare(
+      `SELECT c.id, c.parent_id, c.body, c.created_at, u.username AS author_username, u.role AS author_role
+       FROM history_comments c
+       JOIN users u ON u.id = c.author_id
+       WHERE c.history_id = ?
+       ORDER BY c.created_at ASC`,
+    )
+    .all(hid);
+  return { comments: rows };
+});
+
+app.post("/api/history/:hid/comments", async (request, reply) => {
+  const user = getSessionUser(request);
+  if (!user) return reply.code(401).send({ error: "Not logged in" });
+  const hid = Number(request.params.hid);
+  if (!Number.isInteger(hid) || hid <= 0) return reply.code(400).send({ error: "Invalid id" });
+
+  const hist = db.prepare("SELECT id FROM strike_history WHERE id = ?").get(hid);
+  if (!hist) return reply.code(404).send({ error: "history entry not found" });
+
+  const body = request.body;
+  if (typeof body !== "object" || body === null || typeof body.body !== "string") {
+    return reply.code(400).send({ error: "body required" });
+  }
+  const text = trim(body.body, MAX_COMMENT_LEN);
+  if (!text) return reply.code(400).send({ error: "comment must not be empty" });
+
+  // Flatten depth: if parent_id provided, resolve its real top-level parent.
+  let parentId = null;
+  if (body.parent_id != null) {
+    const pid = Number(body.parent_id);
+    if (!Number.isInteger(pid) || pid <= 0) {
+      return reply.code(400).send({ error: "invalid parent_id" });
+    }
+    const parent = db
+      .prepare("SELECT id, parent_id FROM history_comments WHERE id = ? AND history_id = ?")
+      .get(pid, hid);
+    if (!parent) return reply.code(404).send({ error: "parent comment not found" });
+    // Always attach to the top-level ancestor (depth 1 max).
+    parentId = parent.parent_id ?? parent.id;
+  }
+
+  const r = db
+    .prepare(
+      `INSERT INTO history_comments (history_id, author_id, parent_id, body) VALUES (?, ?, ?, ?)`,
+    )
+    .run(hid, user.id, parentId, text);
+
+  const created = db
+    .prepare(
+      `SELECT c.id, c.parent_id, c.body, c.created_at, u.username AS author_username, u.role AS author_role
+       FROM history_comments c JOIN users u ON u.id = c.author_id
+       WHERE c.id = ?`,
+    )
+    .get(Number(r.lastInsertRowid));
+  return { comment: created };
 });
 
 await app.listen({ port: PORT, host: "0.0.0.0" });

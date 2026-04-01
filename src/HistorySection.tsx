@@ -1,5 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { MessageCircle, Reply, X } from "lucide-react";
 import type { AuthUser } from "./useAuth";
+import { apiFetch } from "./api";
+
+const MAX_APPEAL_LEN = 1000;
+const MAX_COMMENT_LEN = 1000;
 
 export type HistoryEntry = {
   id: number;
@@ -13,11 +18,223 @@ export type HistoryEntry = {
   appeal_message: string | null;
 };
 
+type Comment = {
+  id: number;
+  parent_id: number | null;
+  body: string;
+  created_at: string;
+  author_username: string;
+  author_role: string;
+};
+
 type Props = {
   refreshKey: number;
   user: AuthUser | null;
   onAppealClick: (historyId: number) => void;
 };
+
+function CommentThread({
+  historyId,
+  user,
+}: {
+  historyId: number;
+  user: AuthUser | null;
+}) {
+  const [comments, setComments] = useState<Comment[]>([]);
+  const [expanded, setExpanded] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [replyTo, setReplyTo] = useState<Comment | null>(null);
+  const [draft, setDraft] = useState("");
+  const [posting, setPosting] = useState(false);
+  const [postErr, setPostErr] = useState<string | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const load = async () => {
+    if (!user) return;
+    setLoading(true);
+    try {
+      const r = await apiFetch(`/api/history/${historyId}/comments`);
+      if (r.ok) {
+        const data = (await r.json()) as { comments: Comment[] };
+        setComments(data.comments);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const toggle = async () => {
+    if (!expanded && comments.length === 0) await load();
+    setExpanded((v) => !v);
+  };
+
+  const startReply = (c: Comment) => {
+    setReplyTo(c);
+    setDraft("");
+    setPostErr(null);
+    setTimeout(() => textareaRef.current?.focus(), 50);
+  };
+
+  const cancelReply = () => {
+    setReplyTo(null);
+    setDraft("");
+    setPostErr(null);
+  };
+
+  const submit = async () => {
+    const text = draft.trim().slice(0, MAX_COMMENT_LEN);
+    if (!text || !user) return;
+    setPosting(true);
+    setPostErr(null);
+    try {
+      const body: Record<string, unknown> = { body: text };
+      if (replyTo) body.parent_id = replyTo.id;
+      const r = await apiFetch(`/api/history/${historyId}/comments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) {
+        const j = (await r.json().catch(() => ({}))) as { error?: string };
+        throw new Error(j.error ?? "Failed to post");
+      }
+      setDraft("");
+      setReplyTo(null);
+      await load();
+    } catch (e) {
+      setPostErr(e instanceof Error ? e.message : "Error");
+    } finally {
+      setPosting(false);
+    }
+  };
+
+  // Split into top-level and replies.
+  const topLevel = comments.filter((c) => c.parent_id == null);
+  const replies = comments.filter((c) => c.parent_id != null);
+
+  const roleColor = (role: string) =>
+    role === "david"
+      ? "text-cartoon-blue"
+      : role === "victor"
+        ? "text-strike-red"
+        : "text-mint";
+
+  return (
+    <div className="mt-3 border-t border-zinc-100 pt-2">
+      <button
+        type="button"
+        onClick={() => void toggle()}
+        className="flex items-center gap-1 text-xs text-zinc-500 hover:text-cartoon-blue cursor-pointer"
+      >
+        <MessageCircle className="w-3.5 h-3.5" />
+        {comments.length > 0 || expanded
+          ? `${comments.length} comment${comments.length !== 1 ? "s" : ""}`
+          : "Add a comment"}
+        {expanded ? " ▲" : " ▼"}
+      </button>
+
+      {expanded && (
+        <div className="mt-2 space-y-3">
+          {loading && <p className="text-xs text-zinc-400">Loading…</p>}
+
+          {topLevel.map((c) => {
+            const cReplies = replies.filter((r) => r.parent_id === c.id);
+            return (
+              <div key={c.id} className="space-y-1">
+                <div className="rounded-xl bg-zinc-50 border border-zinc-100 px-3 py-2 text-sm">
+                  <div className="flex flex-wrap items-baseline gap-1 mb-1 text-xs text-zinc-500">
+                    <span className={`font-semibold ${roleColor(c.author_role)}`}>
+                      {c.author_username}
+                    </span>
+                    <span>·</span>
+                    <span>{new Date(c.created_at + "Z").toLocaleString()}</span>
+                    {user && (
+                      <button
+                        type="button"
+                        onClick={() => startReply(c)}
+                        className="ml-auto flex items-center gap-0.5 text-zinc-400 hover:text-cartoon-blue cursor-pointer"
+                      >
+                        <Reply className="w-3 h-3" />
+                        Reply
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-zinc-700 whitespace-pre-wrap">{c.body}</p>
+                </div>
+
+                {cReplies.map((r) => (
+                  <div
+                    key={r.id}
+                    className="ml-6 rounded-xl bg-white border border-zinc-100 px-3 py-2 text-sm"
+                  >
+                    <div className="flex flex-wrap items-baseline gap-1 mb-1 text-xs text-zinc-500">
+                      <span className={`font-semibold ${roleColor(r.author_role)}`}>
+                        {r.author_username}
+                      </span>
+                      <span>·</span>
+                      <span>{new Date(r.created_at + "Z").toLocaleString()}</span>
+                      {user && (
+                        <button
+                          type="button"
+                          onClick={() => startReply(r)}
+                          className="ml-auto flex items-center gap-0.5 text-zinc-400 hover:text-cartoon-blue cursor-pointer"
+                        >
+                          <Reply className="w-3 h-3" />
+                          Reply
+                        </button>
+                      )}
+                    </div>
+                    <p className="text-zinc-700 whitespace-pre-wrap">{r.body}</p>
+                  </div>
+                ))}
+              </div>
+            );
+          })}
+
+          {user && (
+            <div className="pt-1">
+              {replyTo && (
+                <div className="flex items-center gap-2 text-xs text-zinc-500 mb-1">
+                  <Reply className="w-3 h-3" />
+                  Replying to {replyTo.author_username}
+                  <button
+                    type="button"
+                    onClick={cancelReply}
+                    className="ml-auto cursor-pointer text-zinc-400 hover:text-zinc-600"
+                    aria-label="Cancel reply"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+              <textarea
+                ref={textareaRef}
+                value={draft}
+                onChange={(e) => setDraft(e.target.value.slice(0, MAX_COMMENT_LEN))}
+                className="w-full border border-zinc-200 rounded-xl px-2 py-1.5 text-sm min-h-[60px] resize-none focus:outline-none focus:border-cartoon-blue/50"
+                placeholder={replyTo ? "Write a reply…" : "Write a comment…"}
+              />
+              <div className="flex items-center justify-between mt-1">
+                <span className="text-xs text-zinc-400">
+                  {draft.length}/{MAX_COMMENT_LEN}
+                </span>
+                <button
+                  type="button"
+                  disabled={posting || !draft.trim()}
+                  onClick={() => void submit()}
+                  className="px-3 py-1 rounded-full bg-cartoon-blue text-white text-xs font-semibold cursor-pointer disabled:opacity-40"
+                >
+                  {posting ? "Posting…" : "Post"}
+                </button>
+              </div>
+              {postErr && <p className="text-strike-red text-xs mt-1">{postErr}</p>}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function HistorySection({ refreshKey, user, onAppealClick }: Props) {
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
@@ -45,6 +262,16 @@ export function HistorySection({ refreshKey, user, onAppealClick }: Props) {
     return <p className="text-strike-red text-sm text-center">{err}</p>;
   }
 
+  const appealStatusLabel = (status: string | null) => {
+    if (!status) return null;
+    if (status === "open") return "Open";
+    if (status === "resolved_overturn")
+      return "Overturned — strike change was reverted";
+    if (status === "resolved_uphold")
+      return "Upheld — strike change was kept";
+    return status;
+  };
+
   return (
     <section className="w-full max-w-2xl mt-10 mb-8 px-2">
       <h2 className="text-cartoon-blue text-xl font-bold mb-4 text-center">History</h2>
@@ -62,10 +289,13 @@ export function HistorySection({ refreshKey, user, onAppealClick }: Props) {
             </div>
             <p className="text-zinc-700 text-sm mt-2">{e.explanation}</p>
             {e.appeal_id != null && (
-              <p className="text-xs text-zinc-500 mt-2">
-                Appeal: {e.appeal_status}
-                {e.appeal_message ? ` — “${e.appeal_message.slice(0, 80)}…”` : ""}
-              </p>
+              <div className="mt-2 text-xs rounded-lg bg-warning-yellow/20 border border-warning-yellow/40 px-2 py-1.5">
+                <span className="font-semibold text-zinc-600">Appeal: </span>
+                <span className="text-zinc-600">{appealStatusLabel(e.appeal_status)}</span>
+                {e.appeal_message ? (
+                  <p className="mt-0.5 text-zinc-500 line-clamp-2">"{e.appeal_message}"</p>
+                ) : null}
+              </div>
             )}
             {user?.role === "victor" && e.appeal_id == null && (
               <button
@@ -76,6 +306,7 @@ export function HistorySection({ refreshKey, user, onAppealClick }: Props) {
                 Submit appeal
               </button>
             )}
+            <CommentThread historyId={e.id} user={user} />
           </li>
         ))}
       </ul>
@@ -103,6 +334,9 @@ export function AppealModal({
 
   if (!open || historyId == null) return null;
 
+  const charLeft = MAX_APPEAL_LEN - msg.length;
+  const canSubmit = msg.trim().length > 0 && msg.length <= MAX_APPEAL_LEN;
+
   return (
     <div
       className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 px-4"
@@ -110,14 +344,22 @@ export function AppealModal({
       aria-modal="true"
     >
       <div className="bg-white rounded-3xl border-4 border-cartoon-blue/30 p-6 max-w-md w-full shadow-xl">
-        <h2 className="text-cartoon-blue text-lg font-bold mb-2">Appeal this change</h2>
-        <p className="text-zinc-600 text-sm mb-3">Briefly explain why this strike should be reviewed.</p>
+        <h2 className="text-cartoon-blue text-lg font-bold mb-1">Appeal this change</h2>
+        <p className="text-zinc-600 text-sm mb-3">
+          Briefly explain why this strike should be reviewed. Mediators will vote to{" "}
+          <strong>overturn</strong> (revert the change) or <strong>uphold</strong> (keep it).
+          Appeals resolve when one side reaches a majority, or default to <strong>uphold</strong>{" "}
+          after 24 h.
+        </p>
         <textarea
           value={msg}
-          onChange={(e) => setMsg(e.target.value)}
-          className="w-full border-2 border-cartoon-blue/30 rounded-xl px-3 py-2 mb-4 text-sm min-h-[100px]"
+          onChange={(e) => setMsg(e.target.value.slice(0, MAX_APPEAL_LEN))}
+          className="w-full border-2 border-cartoon-blue/30 rounded-xl px-3 py-2 mb-1 text-sm min-h-[100px]"
           placeholder="Your appeal…"
         />
+        <div className="flex justify-end text-xs text-zinc-400 mb-3">
+          {charLeft} characters remaining
+        </div>
         {err && <p className="text-strike-red text-sm mb-2">{err}</p>}
         <div className="flex gap-2 justify-end">
           <button
@@ -133,7 +375,7 @@ export function AppealModal({
           </button>
           <button
             type="button"
-            disabled={busy || !msg.trim()}
+            disabled={busy || !canSubmit}
             onClick={async () => {
               setErr(null);
               setBusy(true);
