@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { MessageCircle, Reply, X } from "lucide-react";
 import type { AuthUser } from "./useAuth";
 import { apiFetch } from "./api";
@@ -33,6 +33,9 @@ type Props = {
   onAppealClick: (historyId: number) => void;
 };
 
+const PREVIEW_COUNT = 3;
+const MAX_THREAD_COMMENTS = 50;
+
 function CommentThread({
   historyId,
   user,
@@ -42,6 +45,7 @@ function CommentThread({
 }) {
   const [comments, setComments] = useState<Comment[]>([]);
   const [expanded, setExpanded] = useState(false);
+  const [showAll, setShowAll] = useState(false);
   const [loading, setLoading] = useState(false);
   const [replyTo, setReplyTo] = useState<Comment | null>(null);
   const [draft, setDraft] = useState("");
@@ -49,7 +53,7 @@ function CommentThread({
   const [postErr, setPostErr] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     if (!user) return;
     setLoading(true);
     try {
@@ -61,12 +65,18 @@ function CommentThread({
     } finally {
       setLoading(false);
     }
-  };
+  }, [historyId, user]);
 
-  const toggle = async () => {
-    if (!expanded && comments.length === 0) await load();
-    setExpanded((v) => !v);
-  };
+  // Load comments on mount and auto-expand if any exist.
+  useEffect(() => {
+    load().then(() => {}).catch(() => {});
+  }, [load]);
+
+  useEffect(() => {
+    if (comments.length > 0) setExpanded(true);
+  }, [comments.length]);
+
+  const toggle = () => setExpanded((v) => !v);
 
   const startReply = (c: Comment) => {
     setReplyTo(c);
@@ -108,7 +118,6 @@ function CommentThread({
     }
   };
 
-  // Split into top-level and replies.
   const topLevel = comments.filter((c) => c.parent_id == null);
   const replies = comments.filter((c) => c.parent_id != null);
 
@@ -119,15 +128,19 @@ function CommentThread({
         ? "text-strike-red"
         : "text-mint";
 
+  // Split into top-level and replies, slice to PREVIEW_COUNT when not expanded-all.
+  const visibleTopLevel = showAll ? topLevel : topLevel.slice(0, PREVIEW_COUNT);
+  const hiddenCount = topLevel.length - PREVIEW_COUNT;
+
   return (
     <div className="mt-3 border-t border-zinc-100 pt-2">
       <button
         type="button"
-        onClick={() => void toggle()}
+        onClick={toggle}
         className="flex items-center gap-1 text-xs text-zinc-500 hover:text-cartoon-blue cursor-pointer"
       >
         <MessageCircle className="w-3.5 h-3.5" />
-        {comments.length > 0 || expanded
+        {comments.length > 0
           ? `${comments.length} comment${comments.length !== 1 ? "s" : ""}`
           : "Add a comment"}
         {expanded ? " ▲" : " ▼"}
@@ -137,7 +150,7 @@ function CommentThread({
         <div className="mt-2 space-y-3">
           {loading && <p className="text-xs text-zinc-400">Loading…</p>}
 
-          {topLevel.map((c) => {
+          {visibleTopLevel.map((c) => {
             const cReplies = replies.filter((r) => r.parent_id === c.id);
             return (
               <div key={c.id} className="space-y-1">
@@ -191,7 +204,32 @@ function CommentThread({
             );
           })}
 
-          {user && (
+          {!showAll && hiddenCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowAll(true)}
+              className="text-xs text-cartoon-blue hover:underline cursor-pointer"
+            >
+              Show {hiddenCount} more comment{hiddenCount !== 1 ? "s" : ""}
+            </button>
+          )}
+          {showAll && topLevel.length > PREVIEW_COUNT && (
+            <button
+              type="button"
+              onClick={() => setShowAll(false)}
+              className="text-xs text-zinc-400 hover:underline cursor-pointer"
+            >
+              Show less
+            </button>
+          )}
+
+          {user && comments.length >= MAX_THREAD_COMMENTS && (
+            <p className="text-xs text-zinc-400 italic">
+              This thread has reached the maximum of {MAX_THREAD_COMMENTS} comments.
+            </p>
+          )}
+
+          {user && comments.length < MAX_THREAD_COMMENTS && (
             <div className="pt-1">
               {replyTo && (
                 <div className="flex items-center gap-2 text-xs text-zinc-500 mb-1">

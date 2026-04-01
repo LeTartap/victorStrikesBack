@@ -668,6 +668,13 @@ app.post("/api/history/:hid/comments", async (request, reply) => {
   const hist = db.prepare("SELECT id FROM strike_history WHERE id = ?").get(hid);
   if (!hist) return reply.code(404).send({ error: "history entry not found" });
 
+  const threadCount = db
+    .prepare("SELECT COUNT(*) AS c FROM history_comments WHERE history_id = ?")
+    .get(hid).c;
+  if (threadCount >= 50) {
+    return reply.code(400).send({ error: "This thread has reached the maximum of 50 comments." });
+  }
+
   const body = request.body;
   if (typeof body !== "object" || body === null || typeof body.body !== "string") {
     return reply.code(400).send({ error: "body required" });
