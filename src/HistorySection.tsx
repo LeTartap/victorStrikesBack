@@ -71,8 +71,7 @@ function CommentThread({
   useEffect(() => {
     if (!user) return;
     load().then(() => {}).catch(() => {});
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [historyId]);
+  }, [historyId, user]);
 
   useEffect(() => {
     if (comments.length > 0) setExpanded(true);
