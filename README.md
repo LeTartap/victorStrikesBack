@@ -1,15 +1,17 @@
 # Victor's Strike Counter
 
-A lightweight, cartoon-styled web app that tracks disciplinary **strikes** for Victor. The count is stored in a **Fastify + SQLite** API so **everyone sees the same number**. **David** (admin) logs in to change strikes and must give a **reason** each time; changes appear in **history**. **Victor** can **appeal** a history entry; **mediators** vote, and if a majority vote to **overturn** after everyone has voted, the strike change is reverted.
+A lightweight, cartoon-styled web app that tracks disciplinary **strikes** for Victor. The count is stored in a **Fastify + SQLite** API so **everyone sees the same number**. **David** (admin) stages a count change with +/− buttons and confirms it with a required reason; changes appear in **history**. **Victor** can **appeal** a history entry; **mediators** vote, and as soon as one side reaches a majority the appeal is resolved; unresolved appeals expire after 24 h defaulting to **uphold**.
 
 ## Features
 
 - **Shared count** — One canonical strike total for all visitors.
-- **Roles** — `david` (change strikes, manage users: create, edit password/role, remove Victor/mediator accounts), `victor` (appeals), `mediator` (vote on appeals).
-- **History** — Every strike change is logged with an explanation.
-- **Appeals** — Victor submits one appeal per history row; mediators vote **overturn** or **uphold**; when **all** mediators have voted, the side with more votes wins (ties uphold David’s change).
-- **Half strikes** — Steps of **0.5** or **1.0**; UI shows a clipped “half” Victor head for 0.5.
-- **Timeout** — At **3.0+** strikes, a “VICTOR'S IN TIMEOUT!” banner appears.
+- **Roles** — `david` (change strikes, manage users: create/edit/remove Victor/mediator accounts), `victor` (appeals, max 2 open simultaneously), `mediator` (vote on appeals).
+- **History** — Every strike change is logged with an explanation. Any logged-in user can add comments and one level of replies.
+- **Appeals** — Victor submits one appeal per history row (max 2 open at once). Mediators vote **overturn** (revert the change) or **uphold** (keep it). Resolves as soon as one side reaches ≥ ⌈total mediators / 2⌉ votes. Expires after **24 h** defaulting to **Uphold**.
+- **Input limits** — Explanations: 500 chars. Appeal messages: 1 000 chars. Comments: 1 000 chars.
+- **Change password** — Every user can change their own password from the top bar (key icon).
+- **Half strikes** — Steps of **0.5** or **1.0**; UI shows a clipped "half" Victor head for 0.5.
+- **Timeout** — At **3.0+** strikes, a "VICTOR'S IN TIMEOUT!" banner appears.
 - **Zero strikes** — Shows **good_victor.png** and *Victor, you're a good boy!*
 
 ## Tech stack
@@ -79,18 +81,30 @@ Vite proxies **`/api`** to `http://127.0.0.1:3000`. Open the URL Vite prints (e.
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | `GET` | `/api/strikes` | — | `{ count }` |
-| `PUT` | `/api/strikes` | Session, role `david` | `{ count, explanation }` |
+| `PUT` | `/api/strikes` | Session, role `david` | `{ count, explanation }` — staged change with reason |
 | `GET` | `/api/history` | — | Paginated history |
 | `POST` | `/api/auth/login` | — | `{ username, password }` → session cookie |
 | `POST` | `/api/auth/logout` | Session | |
 | `GET` | `/api/auth/me` | Session | |
+| `POST` | `/api/auth/change-password` | Any logged-in user | `{ current_password, new_password }` — change own password |
 | `GET` / `POST` | `/api/users` | David only | List / create users (`victor` or `mediator`) |
 | `PATCH` | `/api/users/:id` | David only | Update password and/or role (`victor` \| `mediator`); cannot edit `david` accounts |
-| `DELETE` | `/api/users/:id` | David only | Remove a Victor or mediator; cannot remove `david` or yourself; deletes related appeals/votes |
-| `POST` | `/api/history/:id/appeals` | Victor | `{ message }` |
-| `GET` | `/api/appeals` | David / Victor / Mediator | Role-specific lists (David gets `vote_count` and `mediator_total`) |
-| `GET` | `/api/appeals/:id` | David only | Full appeal + `votes[]` (mediator username, vote, time) |
+| `DELETE` | `/api/users/:id` | David only | Remove a Victor or mediator; cannot remove `david` or yourself |
+| `POST` | `/api/history/:id/appeals` | Victor | `{ message }` — max 2 open appeals per Victor |
+| `GET` | `/api/appeals` | David / Victor / Mediator | Role-specific lists |
+| `GET` | `/api/appeals/:id` | David only | Full appeal + `votes[]` |
 | `POST` | `/api/appeals/:id/vote` | Mediator | `{ vote: "overturn" \| "uphold" }` |
+| `GET` | `/api/history/:id/comments` | Any logged-in user | List comments + replies |
+| `POST` | `/api/history/:id/comments` | Any logged-in user | `{ body, parent_id? }` — replies flatten to depth 1 |
+
+## Appeal vote semantics
+
+| Vote | Meaning |
+|------|---------|
+| **Overturn** | Revert David's strike change (count goes back to the previous value) |
+| **Uphold** | Keep David's strike change as-is |
+
+An appeal resolves as soon as one side reaches ≥ ⌈mediator count / 2⌉ votes. If neither side reaches the threshold within **24 hours**, the appeal closes as **Upheld**.
 
 ## Deploy with Docker Compose (e.g. Raspberry Pi)
 
@@ -117,6 +131,7 @@ Use **Caddy**, **Traefik**, or **Cloudflare Tunnel** in front of the stack for T
 ## Security
 
 - Passwords are hashed with **bcrypt**; sessions use an **httpOnly** cookie.
+- All text inputs (appeals, comments, explanations) are length-capped server-side and trimmed.
 - Do **not** commit `.env`. Anyone who can log in as David can change strikes and manage non-David user accounts; mediators collectively decide appeals.
 - Suitable for a **trusted group**, not high-assurance scenarios.
 
